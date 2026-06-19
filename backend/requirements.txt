@@ -1,0 +1,55 @@
+# --- Web framework ---------------------------------------------------------
+fastapi==0.115.6
+uvicorn[standard]==0.34.0
+python-multipart==0.0.20
+pydantic[email]==2.10.4
+pydantic-settings==2.7.1
+email-validator==2.2.0
+
+# --- Database --------------------------------------------------------------
+sqlalchemy[asyncio]==2.0.36
+alembic==1.14.0
+asyncpg==0.30.0
+psycopg2-binary==2.9.10
+
+# --- Auth / security -------------------------------------------------------
+passlib[bcrypt]==1.7.4
+python-jose[cryptography]==3.3.0
+bcrypt==4.2.1
+cryptography==44.0.0
+
+# --- Background workers ----------------------------------------------------
+celery==5.4.0
+redis==5.2.1
+flower==2.0.1
+
+# --- Discovery / scraping --------------------------------------------------
+feedparser==6.0.11
+beautifulsoup4==4.12.3
+lxml==5.3.0
+python-dateutil==2.9.0.post0
+
+# --- Multimodal / OCR ------------------------------------------------------
+# pytesseract & pdf2image need the system 'tesseract-ocr' and 'poppler-utils'
+# binaries (installed in the Dockerfile). They fail soft if missing.
+pypdf==5.1.0
+pytesseract==0.3.13
+pdf2image==1.17.0
+Pillow==11.0.0
+
+# --- LLM providers (ollama/openai/anthropic via OpenAI-compatible client) ---
+openai==1.59.6
+
+# --- Google Sheets ---------------------------------------------------------
+gspread==6.1.4
+google-auth==2.37.0
+
+# --- Utilities -------------------------------------------------------------
+httpx==0.28.1
+tenacity==9.0.0
+structlog==24.4.0
+
+# --- Testing ---------------------------------------------------------------
+pytest==8.3.4
+pytest-asyncio==0.25.2
+aiosqlite==0.20.0

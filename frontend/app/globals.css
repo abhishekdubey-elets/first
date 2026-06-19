@@ -1,0 +1,64 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: dark;
+}
+
+html,
+body {
+  height: 100%;
+}
+
+body {
+  @apply text-slate-200 antialiased;
+  background-color: #070b1a;
+  background-image:
+    radial-gradient(900px circle at 10% -10%, rgba(99, 102, 241, 0.18), transparent 45%),
+    radial-gradient(900px circle at 90% 0%, rgba(34, 211, 238, 0.12), transparent 45%),
+    radial-gradient(1200px circle at 50% 120%, rgba(139, 92, 246, 0.16), transparent 50%);
+  background-attachment: fixed;
+}
+
+@layer components {
+  .glass {
+    @apply bg-white/5 backdrop-blur-xl border border-white/10 shadow-glass;
+  }
+
+  .glass-hover {
+    @apply transition-colors hover:bg-white/[0.07] hover:border-white/20;
+  }
+
+  .gradient-text {
+    @apply bg-accent-gradient bg-clip-text text-transparent;
+  }
+
+  .input-glass {
+    @apply w-full rounded-lg bg-white/5 border border-white/10 px-3 py-2 text-sm text-slate-100 placeholder:text-slate-500 outline-none transition focus:border-brand-violet/60 focus:bg-white/[0.07] focus:ring-2 focus:ring-brand-violet/20;
+  }
+
+  .btn-gradient {
+    @apply inline-flex items-center justify-center gap-2 rounded-lg bg-accent-gradient px-4 py-2 text-sm font-medium text-white shadow-glow transition hover:opacity-90 active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed;
+  }
+
+  .btn-ghost {
+    @apply inline-flex items-center justify-center gap-2 rounded-lg border border-white/10 bg-white/5 px-4 py-2 text-sm font-medium text-slate-200 transition hover:bg-white/10 disabled:opacity-50 disabled:cursor-not-allowed;
+  }
+}
+
+/* Scrollbars */
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 9999px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.18);
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}

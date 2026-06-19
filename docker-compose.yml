@@ -1,0 +1,148 @@
+# Docker Compose for the IAS Transfer Intelligence Dashboard.
+#
+# One-command local stack: Postgres, Redis, Ollama (local LLM), the FastAPI
+# API, a Celery worker, Celery beat (10-min discovery cadence), Flower
+# (Celery monitoring), and the Next.js dashboard.
+#
+# Quick start:
+#   1. cp .env.example .env   # then edit secrets (SECRET_KEY, ENCRYPTION_KEY)
+#   2. docker compose up -d --build
+#   3. docker compose exec ollama ollama pull llama3.2:3b   # one-time model pull
+#
+# URLs once up:
+#   API docs    -> http://localhost:8000/docs
+#   Dashboard   -> http://localhost:3000
+#   Flower      -> http://localhost:5555
+
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ias
+      POSTGRES_PASSWORD: ias_password
+      POSTGRES_DB: ias_transfers
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ias -d ias_transfers"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # OPTIONAL containerized Ollama. By default the stack uses the Ollama already
+  # running on your HOST (see OLLAMA_BASE_URL=http://host.docker.internal:11434/v1
+  # in .env), matching the sibling transcript project — no 1.5GB image pull needed.
+  # Only start this if you do NOT have host Ollama:
+  #   docker compose --profile with-ollama up -d ollama
+  #   docker compose exec ollama ollama pull llama3.2:3b
+  ollama:
+    image: ollama/ollama:latest
+    profiles: ["with-ollama"]
+    restart: unless-stopped
+    volumes:
+      - ollama:/root/.ollama
+    ports:
+      - "11434:11434"
+
+  api:
+    build: ./backend
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      # Bootstrap the DB schema on first boot (only the API does this).
+      RUN_DB_INIT: "1"
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    ports:
+      - "8000:8000"
+    volumes:
+      - secrets:/data/secrets
+      - storage:/data/storage
+    # Reach the host's Ollama (and any other host service) from inside the container.
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    # Uses the image default CMD (uvicorn app.main:app --host 0.0.0.0 --port 8000).
+
+  worker:
+    build: ./backend
+    restart: unless-stopped
+    # Concurrency kept low: a local LLM holds the whole model per process, so
+    # high concurrency exhausts RAM (and can crash Docker Desktop). Raise only
+    # if you point LLM_PROVIDER at a hosted API (openai/anthropic).
+    command: celery -A app.workers.celery_app.celery worker --loglevel=info --concurrency=2
+    env_file: .env
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      api:
+        condition: service_started
+    volumes:
+      - secrets:/data/secrets
+      - storage:/data/storage
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+  beat:
+    build: ./backend
+    restart: unless-stopped
+    command: celery -A app.workers.celery_app.celery beat --loglevel=info
+    env_file: .env
+    depends_on:
+      redis:
+        condition: service_healthy
+      api:
+        condition: service_started
+    volumes:
+      - secrets:/data/secrets
+      - storage:/data/storage
+
+  flower:
+    build: ./backend
+    restart: unless-stopped
+    command: celery -A app.workers.celery_app.celery flower --port=5555
+    env_file: .env
+    depends_on:
+      redis:
+        condition: service_healthy
+      api:
+        condition: service_started
+    ports:
+      - "5555:5555"
+
+  frontend:
+    build: ./frontend
+    restart: unless-stopped
+    environment:
+      NEXT_PUBLIC_API_BASE_URL: http://localhost:8000
+    ports:
+      - "3000:3000"
+    depends_on:
+      api:
+        condition: service_started
+
+volumes:
+  pgdata:
+  ollama:
+  # Shared so api + worker + beat all see the uploaded Google service-account JSON.
+  secrets:
+  storage:

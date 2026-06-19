@@ -1,0 +1,107 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  backend:
+    name: Backend (lint, compile, tests)
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: ias
+          POSTGRES_PASSWORD: ias_password
+          POSTGRES_DB: ias_transfers
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U ias -d ias_transfers"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    env:
+      # The unit tests below are DB-free, but providing these keeps any
+      # import-time config happy and lets future DB tests use the services.
+      DATABASE_URL: postgresql+asyncpg://ias:ias_password@localhost:5432/ias_transfers
+      DATABASE_URL_SYNC: postgresql+psycopg2://ias:ias_password@localhost:5432/ias_transfers
+      REDIS_URL: redis://localhost:6379/0
+      CELERY_BROKER_URL: redis://localhost:6379/1
+      CELERY_RESULT_BACKEND: redis://localhost:6379/2
+      SECRET_KEY: ci-test-secret-key
+      ENCRYPTION_KEY: ci-placeholder-fernet-key
+      LLM_PROVIDER: ollama
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+
+      - name: Install dependencies
+        working-directory: backend
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pytest
+
+      - name: Ruff lint (non-blocking if not installed)
+        working-directory: backend
+        run: |
+          if pip show ruff >/dev/null 2>&1 || command -v ruff >/dev/null 2>&1; then
+            ruff check . || true
+          else
+            echo "ruff not installed; skipping lint"
+          fi
+
+      - name: Byte-compile the app
+        working-directory: backend
+        run: python -m py_compile $(find app -name "*.py")
+
+      - name: Run tests
+        working-directory: backend
+        run: python -m pytest -q
+
+  frontend:
+    name: Frontend (build)
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install dependencies
+        working-directory: frontend
+        # Use `npm ci` when a lockfile is committed (reproducible); fall back to
+        # `npm install` on first push before a lockfile exists.
+        run: |
+          if [ -f package-lock.json ]; then npm ci; else npm install; fi
+
+      - name: Build
+        working-directory: frontend
+        env:
+          NEXT_PUBLIC_API_BASE_URL: http://localhost:8000
+        run: npm run build

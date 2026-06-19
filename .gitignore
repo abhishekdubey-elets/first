@@ -1,0 +1,51 @@
+# --- Environment / secrets ---------------------------------------------------
+.env
+.env.local
+.env.*.local
+!.env.example
+# Google service-account credentials and any other JSON secrets.
+google-credentials.json
+*-credentials.json
+credentials.json
+/data/
+
+# --- Python ------------------------------------------------------------------
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.eggs/
+.venv/
+venv/
+env/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+*.sqlite3
+*.db
+
+# --- Node / Next.js ----------------------------------------------------------
+node_modules/
+.next/
+out/
+.npm/
+npm-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+next-env.d.ts
+
+# --- Logs --------------------------------------------------------------------
+*.log
+logs/
+
+# --- OS ----------------------------------------------------------------------
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# --- Editors -----------------------------------------------------------------
+.idea/
+.vscode/
+*.swp
