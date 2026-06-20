@@ -55,12 +55,22 @@ def extract_pdf_text(url: str) -> str:
     return ""
 
 
+def _configure_tesseract() -> None:
+    """Point pytesseract at an explicit binary when one is configured."""
+    if settings.TESSERACT_CMD:
+        import pytesseract
+
+        pytesseract.pytesseract.tesseract_cmd = settings.TESSERACT_CMD
+
+
 def _ocr_pdf(data: bytes, url: str) -> str:
     try:
         import pytesseract
         from pdf2image import convert_from_bytes
 
-        pages = convert_from_bytes(data)
+        _configure_tesseract()
+        kwargs = {"poppler_path": settings.POPPLER_PATH} if settings.POPPLER_PATH else {}
+        pages = convert_from_bytes(data, **kwargs)
         return "\n".join(
             pytesseract.image_to_string(p, lang=settings.OCR_LANGUAGES) for p in pages
         )
@@ -80,6 +90,7 @@ def extract_image_text(url: str) -> str:
         import pytesseract
         from PIL import Image
 
+        _configure_tesseract()
         img = Image.open(io.BytesIO(data))
         return pytesseract.image_to_string(img, lang=settings.OCR_LANGUAGES)
     except Exception as exc:  # noqa: BLE001

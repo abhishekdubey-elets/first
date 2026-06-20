@@ -8,7 +8,6 @@ import {
   BarChart3,
   Newspaper,
   RefreshCw,
-  ScrollText,
   Settings as SettingsIcon,
   Radar,
   X,
@@ -22,7 +21,6 @@ const nav = [
   { href: '/analytics', label: 'Analytics', icon: BarChart3 },
   { href: '/news', label: 'News Feed', icon: Newspaper },
   { href: '/sync', label: 'Sheets Sync', icon: RefreshCw },
-  { href: '/logs', label: 'System Logs', icon: ScrollText },
   { href: '/settings', label: 'Settings', icon: SettingsIcon },
 ];
 

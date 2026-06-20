@@ -68,6 +68,11 @@ class ExportConfig(BaseModel):
     auto_export: bool | None = None
 
 
+class OpenAiKeyConfig(BaseModel):
+    # None/empty clears the key and reverts the pipeline to the local Ollama LLM.
+    openai_api_key: str | None = None
+
+
 class RuntimeSettingsOut(BaseModel):
     spreadsheet_id: str | None
     worksheet_name: str | None
@@ -76,6 +81,7 @@ class RuntimeSettingsOut(BaseModel):
     llm_provider: str
     llm_model: str
     discovery_interval_seconds: int
+    openai_configured: bool = False
 
 
 # --- Stats / analytics -----------------------------------------------------
@@ -87,6 +93,4 @@ class StatsOut(BaseModel):
     pending: int
     verified: int
     exported: int
-    avg_confidence: float
     by_state: list[dict]
-    confidence_distribution: list[dict]

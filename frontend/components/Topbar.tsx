@@ -26,7 +26,9 @@ export function Topbar({ onMenu }: { onMenu: () => void }) {
     onSuccess: () => {
       setJustRan(true);
       setTimeout(() => setJustRan(false), 2500);
-      queryClient.invalidateQueries({ queryKey: ['logs'] });
+      queryClient.invalidateQueries({ queryKey: ['transfers'] });
+      queryClient.invalidateQueries({ queryKey: ['stats'] });
+      queryClient.invalidateQueries({ queryKey: ['news'] });
     },
   });
 

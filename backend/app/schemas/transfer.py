@@ -52,12 +52,14 @@ class TransferOut(BaseModel):
     new_posting: str | None
     transfer_date: str | None
     effective_date: str | None
+    # Publication date of the source article (the "news date"); UI falls back to
+    # this when no explicit transfer date was stated in the article.
+    news_date: datetime | None = None
     reason: str | None
     notification_number: str | None
     gov_order_link: str | None
     source_name: str | None
     source_url: str | None
-    confidence_score: float
     corroborating_sources: list | None
     discrepancies: list | None
     status: str

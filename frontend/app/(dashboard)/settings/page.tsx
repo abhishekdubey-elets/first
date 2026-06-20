@@ -12,12 +12,15 @@ import {
   Bell,
   KeyRound,
   Clock,
+  Sparkles,
+  Trash2,
 } from 'lucide-react';
 import {
   getSettings,
   updateExportSettings,
   uploadCredentials,
   getModels,
+  updateOpenAiKey,
 } from '@/lib/api';
 import type { Settings, ModelsResponse } from '@/lib/types';
 import { PageHeader } from '@/components/PageHeader';
@@ -40,6 +43,7 @@ export default function SettingsPage() {
   const [spreadsheetId, setSpreadsheetId] = useState('');
   const [worksheet, setWorksheet] = useState('');
   const [autoExport, setAutoExport] = useState(false);
+  const [openaiKey, setOpenaiKey] = useState('');
   const fileRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -66,6 +70,15 @@ export default function SettingsPage() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['settings'] });
       if (fileRef.current) fileRef.current.value = '';
+    },
+  });
+
+  const saveOpenAi = useMutation({
+    mutationFn: (key: string | null) => updateOpenAiKey(key),
+    onSuccess: () => {
+      setOpenaiKey('');
+      queryClient.invalidateQueries({ queryKey: ['settings'] });
+      queryClient.invalidateQueries({ queryKey: ['models'] });
     },
   });
 
@@ -315,6 +328,87 @@ export default function SettingsPage() {
         <p className="mt-3 text-xs text-slate-500">
           The active model is configured on the backend. Availability reflects
           provider credentials detected server-side.
+        </p>
+      </GlassCard>
+
+      {/* OpenAI API key (optional) */}
+      <GlassCard>
+        <div className="flex items-center gap-2">
+          <Sparkles className="h-4 w-4 text-brand-cyan" />
+          <h3 className="text-sm font-semibold text-white">
+            OpenAI API key{' '}
+            <span className="font-normal text-slate-400">(optional)</span>
+          </h3>
+        </div>
+        <p className="mt-1.5 text-sm text-slate-400">
+          Add an OpenAI key to run extraction on GPT instead of the local model.
+          Leave it empty to keep using the local Ollama model — the original,
+          key-free behaviour.
+        </p>
+
+        <p
+          className={cn(
+            'mt-3 text-sm font-medium',
+            s?.openai_configured ? 'text-emerald-300' : 'text-slate-400'
+          )}
+        >
+          {s?.openai_configured
+            ? '● Configured — using OpenAI'
+            : '○ Not configured — using local Ollama'}
+        </p>
+
+        <div className="mt-4 flex flex-wrap items-end gap-3">
+          <label className="flex flex-1 flex-col gap-1.5" style={{ minWidth: 240 }}>
+            <span className="text-xs font-medium text-slate-400">
+              OpenAI API key
+            </span>
+            <input
+              type="password"
+              autoComplete="off"
+              className="input-glass"
+              value={openaiKey}
+              onChange={(e) => setOpenaiKey(e.target.value)}
+              placeholder={s?.openai_configured ? '•••••••• (saved)' : 'sk-…'}
+            />
+          </label>
+          <button
+            type="button"
+            onClick={() => saveOpenAi.mutate(openaiKey)}
+            disabled={saveOpenAi.isPending || !openaiKey.trim()}
+            className="btn-gradient disabled:opacity-50"
+          >
+            {saveOpenAi.isPending ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <Save className="h-4 w-4" />
+            )}
+            Save key
+          </button>
+          {s?.openai_configured && (
+            <button
+              type="button"
+              onClick={() => saveOpenAi.mutate(null)}
+              disabled={saveOpenAi.isPending}
+              className="flex items-center gap-1.5 rounded-lg border border-white/10 px-4 py-2 text-sm text-slate-300 hover:bg-white/5"
+            >
+              <Trash2 className="h-4 w-4" /> Remove key
+            </button>
+          )}
+        </div>
+
+        {saveOpenAi.isSuccess && (
+          <span className="mt-3 flex items-center gap-1.5 text-sm text-emerald-300">
+            <CheckCircle2 className="h-4 w-4" /> Saved
+          </span>
+        )}
+        {saveOpenAi.isError && (
+          <span className="mt-3 block text-sm text-rose-300">
+            Failed to update key.
+          </span>
+        )}
+        <p className="mt-3 text-xs text-slate-500">
+          Stored encrypted at rest on the server. The key itself is never sent
+          back to the dashboard.
         </p>
       </GlassCard>
 

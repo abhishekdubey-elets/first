@@ -81,3 +81,16 @@ class IasTransfer(Base):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )
+
+    @property
+    def news_date(self) -> datetime | None:
+        """Publication date of the source article (the "news date").
+
+        Surfaced so the UI can fall back to it when the article never states an
+        explicit transfer date. Returns None if the article isn't loaded.
+        """
+        from sqlalchemy import inspect as _sa_inspect
+
+        if "article" in _sa_inspect(self).unloaded:
+            return None
+        return self.article.published_at if self.article else None

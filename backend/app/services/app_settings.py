@@ -21,6 +21,9 @@ _DEFAULTS: dict[str, Any] = {
     "llm_provider": settings.LLM_PROVIDER,
     "llm_model": "",
     "discovery_interval_seconds": settings.DISCOVERY_INTERVAL_SECONDS,
+    # Optional, admin-supplied OpenAI key (Fernet-encrypted at rest). Empty means
+    # "not configured" — the pipeline then runs on the original local Ollama LLM.
+    "openai_api_key": "",
 }
 
 
@@ -41,6 +44,9 @@ def _write(data: dict[str, Any]) -> None:
 def get_export_config() -> dict[str, Any]:
     data = _read()
     data["credentials_uploaded"] = Path(settings.GOOGLE_CREDENTIALS_FILE).exists()
+    data["openai_configured"] = bool(data.get("openai_api_key"))
+    # Never surface the (encrypted) secret itself to callers.
+    data.pop("openai_api_key", None)
     return data
 
 
@@ -49,5 +55,34 @@ def update_export_config(**changes: Any) -> dict[str, Any]:
     for key, value in changes.items():
         if value is not None and key in _DEFAULTS:
             data[key] = value
+    _write(data)
+    return get_export_config()
+
+
+def get_openai_key() -> str:
+    """Return the decrypted runtime OpenAI key, or '' if none is configured."""
+    from app.core.security import decrypt_secret
+
+    enc = _read().get("openai_api_key") or ""
+    return decrypt_secret(enc) if enc else ""
+
+
+def set_openai_key(plaintext: str | None) -> dict[str, Any]:
+    """Store (encrypted) or clear the OpenAI key.
+
+    A non-empty key switches the active LLM provider to ``openai``. Clearing it
+    reverts the provider to the original env default (Ollama), so the pipeline
+    behaves exactly as before when no key is supplied.
+    """
+    from app.core.security import encrypt_secret
+
+    data = _read()
+    key = (plaintext or "").strip()
+    if key:
+        data["openai_api_key"] = encrypt_secret(key)
+        data["llm_provider"] = "openai"
+    else:
+        data["openai_api_key"] = ""
+        data["llm_provider"] = settings.LLM_PROVIDER
     _write(data)
     return get_export_config()

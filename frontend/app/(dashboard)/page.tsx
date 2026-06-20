@@ -7,7 +7,6 @@ import {
   CalendarDays,
   CalendarRange,
   CalendarClock,
-  Gauge,
   ExternalLink,
 } from 'lucide-react';
 import { getStats, getTransfers, getNews } from '@/lib/api';
@@ -17,12 +16,10 @@ import { StatCard } from '@/components/StatCard';
 import { GlassCard } from '@/components/GlassCard';
 import { ChartCard } from '@/components/charts/ChartCard';
 import { BarChartView } from '@/components/charts/BarChartCard';
-import { DonutChartView } from '@/components/charts/DonutChartCard';
 import { DataTable, Column } from '@/components/DataTable';
-import { ConfidenceBadge } from '@/components/ConfidenceBadge';
 import { EmptyState } from '@/components/EmptyState';
 import { CardSkeleton, TableSkeleton, Skeleton } from '@/components/Skeleton';
-import { fmtDate, fmtRelative, fmtPercent, fmtNumber } from '@/lib/format';
+import { fmtDate, fmtRelative, fmtNumber, safeDate } from '@/lib/format';
 
 export default function DashboardPage() {
   const statsQ = useQuery<Stats>({ queryKey: ['stats'], queryFn: getStats });
@@ -51,12 +48,20 @@ export default function DashboardPage() {
       ),
     },
     {
-      key: 'move',
-      header: 'Move',
+      key: 'from',
+      header: 'From',
       render: (r) => (
         <span className="text-slate-300">
-          {r.previous_district || '—'}{' '}
-          <span className="text-slate-500">→</span> {r.new_district || '—'}
+          {r.previous_district || r.previous_posting || '—'}
+        </span>
+      ),
+    },
+    {
+      key: 'to',
+      header: 'To',
+      render: (r) => (
+        <span className="text-slate-300">
+          {r.new_district || r.new_posting || '—'}
         </span>
       ),
     },
@@ -64,14 +69,41 @@ export default function DashboardPage() {
     {
       key: 'date',
       header: 'Date',
-      render: (r) => (
-        <span className="text-slate-400">{fmtDate(r.transfer_date)}</span>
-      ),
+      render: (r) => {
+        // Prefer an explicit, parseable transfer date; otherwise fall back to
+        // the article's publication date (the "news date").
+        if (safeDate(r.transfer_date)) {
+          return <span className="text-slate-400">{fmtDate(r.transfer_date)}</span>;
+        }
+        if (safeDate(r.news_date)) {
+          return (
+            <span className="text-slate-400">
+              {fmtDate(r.news_date)}
+              <span className="ml-1 text-[10px] uppercase tracking-wide text-slate-500">
+                news
+              </span>
+            </span>
+          );
+        }
+        return <span className="text-slate-500">—</span>;
+      },
     },
     {
-      key: 'confidence',
-      header: 'Confidence',
-      render: (r) => <ConfidenceBadge score={r.confidence_score} />,
+      key: 'source',
+      header: 'Source',
+      render: (r) =>
+        r.source_url ? (
+          <a
+            href={r.source_url}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-slate-300 hover:text-brand-cyan"
+          >
+            {r.source_name || 'Link'}
+          </a>
+        ) : (
+          <span className="text-slate-400">{r.source_name || '—'}</span>
+        ),
     },
   ];
 
@@ -83,9 +115,9 @@ export default function DashboardPage() {
       />
 
       {/* Stat cards */}
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-5">
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
         {statsQ.isLoading || !s ? (
-          Array.from({ length: 5 }).map((_, i) => <CardSkeleton key={i} />)
+          Array.from({ length: 4 }).map((_, i) => <CardSkeleton key={i} />)
         ) : (
           <>
             <StatCard
@@ -116,50 +148,23 @@ export default function DashboardPage() {
               accent="indigo"
               delay={0.15}
             />
-            <StatCard
-              label="Avg confidence"
-              value={fmtPercent(s.avg_confidence)}
-              icon={Gauge}
-              accent="violet"
-              sub={`${fmtNumber(s.verified)} verified · ${fmtNumber(s.pending)} pending`}
-              delay={0.2}
-            />
           </>
         )}
       </div>
 
       {/* Charts */}
-      <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
-        <div className="lg:col-span-2">
-          <ChartCard
-            title="Transfers by state"
-            subtitle="Distribution across cadre states"
-            delay={0.1}
-          >
-            {statsQ.isLoading ? (
-              <Skeleton className="h-[280px] w-full" />
-            ) : s && s.by_state.length > 0 ? (
-              <BarChartView data={s.by_state} xKey="state" yKey="count" />
-            ) : (
-              <EmptyState title="No state data" message="Awaiting first verified transfers." />
-            )}
-          </ChartCard>
-        </div>
+      <div className="grid grid-cols-1 gap-4">
         <ChartCard
-          title="Confidence distribution"
-          subtitle="Buckets across all records"
-          delay={0.15}
+          title="Transfers by state"
+          subtitle="Distribution across cadre states"
+          delay={0.1}
         >
           {statsQ.isLoading ? (
             <Skeleton className="h-[280px] w-full" />
-          ) : s && s.confidence_distribution.length > 0 ? (
-            <DonutChartView
-              data={s.confidence_distribution}
-              nameKey="bucket"
-              valueKey="count"
-            />
+          ) : s && s.by_state.length > 0 ? (
+            <BarChartView data={s.by_state} xKey="state" yKey="count" />
           ) : (
-            <EmptyState title="No confidence data" message="Nothing scored yet." />
+            <EmptyState title="No state data" message="Awaiting first verified transfers." />
           )}
         </ChartCard>
       </div>

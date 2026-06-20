@@ -4,8 +4,6 @@ import type {
   Article,
   AuthUser,
   LoginResponse,
-  Log,
-  LogsQuery,
   ModelsResponse,
   NewsQuery,
   Paginated,
@@ -136,14 +134,6 @@ export async function getNews(query?: NewsQuery): Promise<Paginated<Article>> {
   return data;
 }
 
-// ---------- Logs ----------
-export async function getLogs(query?: LogsQuery): Promise<Paginated<Log>> {
-  const { data } = await api.get<Paginated<Log>>('/api/v1/logs', {
-    params: cleanParams(query as Record<string, unknown>),
-  });
-  return data;
-}
-
 // ---------- Sync ----------
 export async function getSyncStatus(): Promise<SyncStatus> {
   const { data } = await api.get<SyncStatus>('/api/v1/sync/status');
@@ -186,6 +176,16 @@ export async function uploadCredentials(file: File): Promise<{ ok: boolean }> {
 
 export async function getModels(): Promise<ModelsResponse> {
   const { data } = await api.get<ModelsResponse>('/api/v1/settings/models');
+  return data;
+}
+
+// Set (or clear, by passing null) the optional OpenAI API key.
+export async function updateOpenAiKey(
+  key: string | null,
+): Promise<Settings> {
+  const { data } = await api.put<Settings>('/api/v1/settings/openai', {
+    openai_api_key: key,
+  });
   return data;
 }
 

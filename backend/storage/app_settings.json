@@ -1,0 +1,9 @@
+{
+  "spreadsheet_id": "1-PEOwLkIl_LqxxF5ST6jZMrczmYNH6LYyc3avDRBjhE",
+  "worksheet_name": "Transfers",
+  "auto_export": false,
+  "llm_provider": "ollama",
+  "llm_model": "",
+  "discovery_interval_seconds": 600,
+  "openai_api_key": ""
+}

@@ -40,20 +40,6 @@ async def dashboard_stats(
         .limit(15)
     )).all()
 
-    buckets = {"0.0-0.5": 0, "0.5-0.7": 0, "0.7-0.85": 0, "0.85-1.0": 0}
-    conf_rows = (await db.execute(select(IasTransfer.confidence_score))).scalars().all()
-    for c in conf_rows:
-        if c < 0.5:
-            buckets["0.0-0.5"] += 1
-        elif c < 0.7:
-            buckets["0.5-0.7"] += 1
-        elif c < 0.85:
-            buckets["0.7-0.85"] += 1
-        else:
-            buckets["0.85-1.0"] += 1
-
-    avg = (await db.execute(select(func.avg(IasTransfer.confidence_score)))).scalar()
-
     return StatsOut(
         total_transfers=await _count(db),
         today=await _count(db, IasTransfer.created_at >= today),
@@ -62,9 +48,7 @@ async def dashboard_stats(
         pending=await _count(db, IasTransfer.status == TransferStatus.PENDING),
         verified=await _count(db, IasTransfer.status == TransferStatus.VERIFIED),
         exported=await _count(db, IasTransfer.status == TransferStatus.EXPORTED),
-        avg_confidence=round(float(avg or 0), 3),
         by_state=[{"state": s or "Unknown", "count": n} for s, n in by_state_rows],
-        confidence_distribution=[{"bucket": k, "count": v} for k, v in buckets.items()],
     )
 
 
@@ -86,12 +70,16 @@ async def analytics(
         select(IasTransfer.new_district, func.count())
         .group_by(IasTransfer.new_district).order_by(func.count().desc()).limit(20)
     )).all()
+    # Group/order by the SAME expression used in SELECT. Postgres can't match a
+    # bare date_trunc() in GROUP BY to a to_char(date_trunc()) in SELECT when the
+    # truncation unit is a bound parameter, so reuse one expression object.
+    month_expr = func.to_char(
+        func.date_trunc("month", IasTransfer.created_at), "YYYY-MM"
+    )
     by_month = (await db.execute(
-        select(
-            func.to_char(func.date_trunc("month", IasTransfer.created_at), "YYYY-MM"),
-            func.count(),
-        ).group_by(func.date_trunc("month", IasTransfer.created_at))
-        .order_by(func.date_trunc("month", IasTransfer.created_at))
+        select(month_expr, func.count())
+        .group_by(month_expr)
+        .order_by(month_expr)
     )).all()
 
     return {

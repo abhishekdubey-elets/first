@@ -19,7 +19,6 @@ import type { Transfer } from '@/lib/types';
 import { PageHeader } from '@/components/PageHeader';
 import { GlassCard } from '@/components/GlassCard';
 import { StatusBadge } from '@/components/StatusBadge';
-import { ConfidenceBadge } from '@/components/ConfidenceBadge';
 import { EmptyState } from '@/components/EmptyState';
 import { Skeleton } from '@/components/Skeleton';
 import { fmtDate } from '@/lib/format';
@@ -133,7 +132,6 @@ export default function OfficerProfilePage() {
                 </div>
                 <div className="flex flex-wrap items-center gap-2 pt-1">
                   <StatusBadge status={current.status} />
-                  <ConfidenceBadge score={current.confidence_score} />
                 </div>
                 <p className="pt-1 text-xs text-slate-400">
                   Effective {fmtDate(current.effective_date || current.transfer_date)}
@@ -164,7 +162,6 @@ export default function OfficerProfilePage() {
                         <span className="text-slate-500">→</span>{' '}
                         {t.new_posting || t.new_district || 'Unknown'}
                       </p>
-                      <ConfidenceBadge score={t.confidence_score} />
                     </div>
                     <p className="mt-0.5 text-xs text-slate-400">
                       {fmtDate(t.transfer_date)}

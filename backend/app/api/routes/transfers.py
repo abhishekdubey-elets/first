@@ -4,6 +4,7 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from app.api.deps import Pagination, get_current_user
 from app.core.database import get_db
@@ -15,7 +16,6 @@ router = APIRouter(prefix="/transfers", tags=["transfers"])
 _SORT_FIELDS = {
     "created_at": IasTransfer.created_at,
     "transfer_date": IasTransfer.transfer_date,
-    "confidence": IasTransfer.confidence_score,
     "officer": IasTransfer.officer_name,
 }
 
@@ -32,7 +32,6 @@ async def list_transfers(
     batch: str | None = None,
     cadre: str | None = None,
     source: str | None = None,
-    min_confidence: float | None = None,
     status: str | None = None,
     sort: str = Query("created_at"),
     order: str = Query("desc", pattern="^(asc|desc)$"),
@@ -62,8 +61,6 @@ async def list_transfers(
         conds.append(IasTransfer.cadre.ilike(f"%{cadre}%"))
     if source:
         conds.append(IasTransfer.source_name.ilike(f"%{source}%"))
-    if min_confidence is not None:
-        conds.append(IasTransfer.confidence_score >= min_confidence)
     if status:
         conds.append(IasTransfer.status == status)
     if conds:
@@ -75,7 +72,12 @@ async def list_transfers(
 
     col = _SORT_FIELDS.get(sort, IasTransfer.created_at)
     col = col.asc() if order == "asc" else col.desc()
-    stmt = stmt.order_by(col).offset(pg.offset).limit(pg.page_size)
+    stmt = (
+        stmt.options(selectinload(IasTransfer.article))
+        .order_by(col)
+        .offset(pg.offset)
+        .limit(pg.page_size)
+    )
     items = (await db.execute(stmt)).scalars().all()
 
     return TransferListOut(
@@ -90,7 +92,11 @@ async def get_transfer(
     db: AsyncSession = Depends(get_db),
     _: object = Depends(get_current_user),
 ):
-    rec = await db.get(IasTransfer, transfer_id)
+    rec = (await db.execute(
+        select(IasTransfer)
+        .where(IasTransfer.id == transfer_id)
+        .options(selectinload(IasTransfer.article))
+    )).scalars().first()
     if rec is None:
         raise HTTPException(404, "Transfer not found")
     return rec
@@ -106,6 +112,7 @@ async def officer_history(
     rows = (await db.execute(
         select(IasTransfer)
         .where(IasTransfer.officer_name.ilike(f"%{name}%"))
+        .options(selectinload(IasTransfer.article))
         .order_by(IasTransfer.created_at.desc())
     )).scalars().all()
     return rows

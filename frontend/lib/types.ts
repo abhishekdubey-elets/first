@@ -20,12 +20,12 @@ export interface Transfer {
   new_posting: string;
   transfer_date: string;
   effective_date: string;
+  news_date: string | null;
   reason: string;
   notification_number: string;
   gov_order_link: string;
   source_name: string;
   source_url: string;
-  confidence_score: number; // 0..1
   corroborating_sources: string[];
   discrepancies: Record<string, unknown>[];
   status: TransferStatus;
@@ -49,18 +49,6 @@ export interface Article {
   published_at: string;
   status: ArticleStatus;
   relevance_score: number;
-  created_at: string;
-}
-
-export type LogLevel = 'INFO' | 'WARNING' | 'ERROR' | 'SUCCESS';
-
-export interface Log {
-  id: string;
-  level: LogLevel;
-  agent: string;
-  action: string;
-  message: string;
-  context: Record<string, unknown> | string | null;
   created_at: string;
 }
 
@@ -89,11 +77,6 @@ export interface ByMonth {
   count: number;
 }
 
-export interface ConfidenceBucket {
-  bucket: string;
-  count: number;
-}
-
 export interface Stats {
   total_transfers: number;
   today: number;
@@ -102,9 +85,7 @@ export interface Stats {
   pending: number;
   verified: number;
   exported: number;
-  avg_confidence: number;
   by_state: ByState[];
-  confidence_distribution: ConfidenceBucket[];
 }
 
 export interface Analytics {
@@ -162,6 +143,7 @@ export interface Settings {
   llm_provider: string;
   llm_model: string;
   discovery_interval_seconds: number;
+  openai_configured: boolean;
 }
 
 export interface ProviderModel {
@@ -186,9 +168,8 @@ export interface TransfersQuery {
   batch?: string;
   cadre?: string;
   source?: string;
-  min_confidence?: number;
   status?: string;
-  sort?: 'created_at' | 'transfer_date' | 'confidence' | 'officer';
+  sort?: 'created_at' | 'transfer_date' | 'officer';
   order?: 'asc' | 'desc';
 }
 
@@ -196,12 +177,4 @@ export interface NewsQuery {
   page?: number;
   page_size?: number;
   status?: string;
-}
-
-export interface LogsQuery {
-  page?: number;
-  page_size?: number;
-  level?: LogLevel | '';
-  agent?: string;
-  q?: string;
 }

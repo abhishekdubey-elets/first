@@ -236,3 +236,6 @@ docs at http://localhost:8000/docs.
 
 See [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md) for the production guide (reverse
 proxy + TLS, scaling, backups, monitoring, and a security hardening checklist).
+
+
+powershell -ExecutionPolicy Bypass -File .\start-all.ps1

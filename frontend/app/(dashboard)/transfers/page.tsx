@@ -12,7 +12,6 @@ import { GlassCard } from '@/components/GlassCard';
 import { FilterBar, TextField, SelectField } from '@/components/FilterBar';
 import { DataTable, Column } from '@/components/DataTable';
 import { Pagination } from '@/components/Pagination';
-import { ConfidenceBadge } from '@/components/ConfidenceBadge';
 import { StatusBadge } from '@/components/StatusBadge';
 import { EmptyState } from '@/components/EmptyState';
 import { TableSkeleton } from '@/components/Skeleton';
@@ -34,8 +33,6 @@ const sortOptions = [
   { value: 'created_at:asc', label: 'Oldest first' },
   { value: 'transfer_date:desc', label: 'Transfer date ↓' },
   { value: 'transfer_date:asc', label: 'Transfer date ↑' },
-  { value: 'confidence:desc', label: 'Confidence ↓' },
-  { value: 'confidence:asc', label: 'Confidence ↑' },
   { value: 'officer:asc', label: 'Officer A–Z' },
 ];
 
@@ -51,7 +48,6 @@ function TransfersExplorer() {
   const [batch, setBatch] = useState('');
   const [cadre, setCadre] = useState('');
   const [source, setSource] = useState('');
-  const [minConfidence, setMinConfidence] = useState('');
   const [status, setStatus] = useState('');
   const [sortSel, setSortSel] = useState('created_at:desc');
 
@@ -75,7 +71,6 @@ function TransfersExplorer() {
     batch: batch || undefined,
     cadre: cadre || undefined,
     source: source || undefined,
-    min_confidence: minConfidence ? Number(minConfidence) : undefined,
     status: status || undefined,
     sort,
     order,
@@ -95,7 +90,6 @@ function TransfersExplorer() {
     setBatch('');
     setCadre('');
     setSource('');
-    setMinConfidence('');
     setStatus('');
     setSortSel('created_at:desc');
     setPage(1);
@@ -125,12 +119,19 @@ function TransfersExplorer() {
       ),
     },
     {
-      key: 'move',
-      header: 'Move',
+      key: 'from',
+      header: 'From',
       render: (r) => (
         <span className="text-slate-300">
-          {r.previous_posting || r.previous_district || '—'}{' '}
-          <span className="text-slate-500">→</span>{' '}
+          {r.previous_posting || r.previous_district || '—'}
+        </span>
+      ),
+    },
+    {
+      key: 'to',
+      header: 'To',
+      render: (r) => (
+        <span className="text-slate-300">
           {r.new_posting || r.new_district || '—'}
         </span>
       ),
@@ -142,11 +143,6 @@ function TransfersExplorer() {
       render: (r) => (
         <span className="text-slate-400">{fmtDate(r.transfer_date)}</span>
       ),
-    },
-    {
-      key: 'confidence',
-      header: 'Confidence',
-      render: (r) => <ConfidenceBadge score={r.confidence_score} />,
     },
     {
       key: 'status',
@@ -170,7 +166,6 @@ function TransfersExplorer() {
         <TextField label="Batch" value={batch} onChange={(v) => { setBatch(v); setPage(1); }} placeholder="e.g. 2011" />
         <TextField label="Cadre" value={cadre} onChange={(v) => { setCadre(v); setPage(1); }} placeholder="cadre" />
         <TextField label="Source" value={source} onChange={(v) => { setSource(v); setPage(1); }} placeholder="source name" />
-        <TextField label="Min confidence (0–1)" value={minConfidence} onChange={(v) => { setMinConfidence(v); setPage(1); }} placeholder="0.7" />
         <SelectField label="Status" value={status} onChange={(v) => { setStatus(v); setPage(1); }} options={statusOptions} />
         <SelectField label="Sort by" value={sortSel} onChange={(v) => { setSortSel(v); setPage(1); }} options={sortOptions} />
       </FilterBar>

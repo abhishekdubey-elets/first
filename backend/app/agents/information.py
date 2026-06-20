@@ -23,12 +23,23 @@ SYSTEM_PROMPT = (
     "articles and government orders and extract STRUCTURED data about officer "
     "transfers. Rules:\n"
     "1. Only extract real IAS/administrative transfer information actually stated "
-    "in the text.\n"
-    "2. If a field is not present, return null. NEVER guess or hallucinate.\n"
-    "3. One article may describe multiple officer transfers (a reshuffle) — return "
+    "in the text. NEVER invent or hallucinate.\n"
+    "2. Capture the officer's PREVIOUS posting and district whenever the text "
+    "implies them — e.g. 'transferred from <place>', 'currently <role>', "
+    "'<District> Collector/DM', 'replacing / in place of / vice <officer>', "
+    "'shifted from X to Y'. Put the prior office/role in previous_posting and the "
+    "prior district in previous_district; do the same for new_posting/new_district "
+    "for the destination.\n"
+    "3. If a field is genuinely not stated, return null. Do NOT output placeholder "
+    "strings such as 'TBA', 'NA', 'N/A', 'Not specified', 'Unknown', 'to be "
+    "decided', 'with immediate effect', or their Hindi equivalents (e.g. "
+    "'निर्धारित नहीं') — use null instead.\n"
+    "4. Dates: copy a date only if an actual calendar date is given (any format is "
+    "fine, copy it verbatim). If no concrete date is stated, return null for that "
+    "date field — never a placeholder.\n"
+    "5. One article may describe multiple officer transfers (a reshuffle) — return "
     "one object per officer.\n"
-    "4. Dates must be copied verbatim as written (do not reformat or infer).\n"
-    "5. confidence_score (0.0-1.0) reflects how clearly the article states the "
+    "6. confidence_score (0.0-1.0) reflects how clearly the article states the "
     "transfer for THAT officer.\n"
     "Respond with strict JSON only."
 )
@@ -82,11 +93,15 @@ class InformationAgent(BaseAgent):
                                     provider=provider, model=model)
             result = ExtractionResult.model_validate(raw)
         except Exception as exc:  # noqa: BLE001
-            article.status = ArticleStatus.FAILED
-            article.error = f"LLM extraction failed: {exc}"
-            self.audit("inform", f"LLM extraction failed for article {article.id}",
+            # An LLM call error / unparseable reply is usually TRANSIENT — the
+            # local model was momentarily overloaded or timed out. Do not mark
+            # the article permanently FAILED on a single blip; record the error
+            # and re-raise so the Celery task retries it (and a later discovery
+            # cycle can pick it up again) instead of dropping relevant news.
+            article.error = f"LLM extraction error (will retry): {exc}"
+            self.audit("inform", f"LLM extraction error for article {article.id} — will retry",
                        level=LogLevel.ERROR, article_id=article.id, error=str(exc))
-            return []
+            raise
 
         if not result.is_transfer_news or not result.transfers:
             article.status = ArticleStatus.IRRELEVANT

@@ -9,8 +9,20 @@ from app.api.deps import get_current_user, require_admin
 from app.core.database import get_db
 from app.models import IasTransfer, SheetSyncLog
 from app.models.enums import TransferStatus
+from app.schemas.common import SyncLogOut
 
 router = APIRouter(prefix="/sync", tags=["sync"])
+
+
+@router.get("/logs", response_model=list[SyncLogOut])
+async def sync_logs(
+    db: AsyncSession = Depends(get_db),
+    _: object = Depends(get_current_user),
+):
+    rows = (await db.execute(
+        select(SheetSyncLog).order_by(SheetSyncLog.created_at.desc()).limit(50)
+    )).scalars().all()
+    return rows
 
 
 @router.get("/status")

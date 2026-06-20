@@ -28,19 +28,36 @@ class LLMError(Exception):
     """Raised when an LLM completion fails."""
 
 
+def _openai_key() -> str:
+    """OpenAI key from runtime settings (Settings page) or, failing that, env."""
+    from app.services.app_settings import get_openai_key
+
+    return get_openai_key() or settings.OPENAI_API_KEY
+
+
+def active_provider() -> LLMProvider:
+    """The effective provider: runtime-selected (Settings page) else env default.
+
+    With no OpenAI key supplied this stays ``ollama`` — the original behaviour.
+    """
+    from app.services.app_settings import get_export_config
+
+    return get_export_config().get("llm_provider") or settings.LLM_PROVIDER
+
+
 def is_available(provider: LLMProvider | None = None) -> bool:
-    provider = provider or settings.LLM_PROVIDER
+    provider = provider or active_provider()
     if provider == "ollama":
         return True  # assumed reachable; call fails loudly if not
     if provider == "openai":
-        return bool(settings.OPENAI_API_KEY)
+        return bool(_openai_key())
     if provider == "anthropic":
         return bool(settings.ANTHROPIC_API_KEY)
     return False
 
 
 def active_model(provider: LLMProvider | None = None) -> str:
-    provider = provider or settings.LLM_PROVIDER
+    provider = provider or active_provider()
     return {
         "ollama": settings.OLLAMA_MODEL,
         "openai": settings.OPENAI_MODEL,
@@ -54,9 +71,10 @@ def _client(provider: LLMProvider):
     if provider == "ollama":
         return OpenAI(base_url=settings.OLLAMA_BASE_URL, api_key="ollama")
     if provider == "openai":
-        if not settings.OPENAI_API_KEY:
+        key = _openai_key()
+        if not key:
             raise LLMError("OPENAI_API_KEY is not configured.")
-        return OpenAI(api_key=settings.OPENAI_API_KEY)
+        return OpenAI(api_key=key)
     if provider == "anthropic":
         if not settings.ANTHROPIC_API_KEY:
             raise LLMError("ANTHROPIC_API_KEY is not configured.")
@@ -79,7 +97,7 @@ def complete_json(
     Robust to models that wrap JSON in markdown fences (common with small
     local models that don't honour response_format).
     """
-    provider = provider or settings.LLM_PROVIDER
+    provider = provider or active_provider()
     model = model or active_model(provider)
     client = _client(provider)
 

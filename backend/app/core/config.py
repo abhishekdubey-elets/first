@@ -96,6 +96,11 @@ class Settings(BaseSettings):
     # --- Multimodal / OCR --------------------------------------------------
     ENABLE_OCR: bool = True
     OCR_LANGUAGES: str = "eng+hin"
+    # Optional explicit paths to the Tesseract binary and the Poppler "bin"
+    # folder. Leave blank to rely on PATH (the default in the Docker image).
+    # On a native Windows install they point at the per-user install dirs.
+    TESSERACT_CMD: str = ""
+    POPPLER_PATH: str = ""
 
     # --- Google Sheets -----------------------------------------------------
     GOOGLE_CREDENTIALS_FILE: str = "/data/secrets/google-credentials.json"
