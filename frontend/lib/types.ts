@@ -173,6 +173,33 @@ export interface TransfersQuery {
   order?: 'asc' | 'desc';
 }
 
+export interface ChatSource {
+  id: number;
+  officer_name: string;
+  state?: string | null;
+  previous_district?: string | null;
+  previous_posting?: string | null;
+  new_district?: string | null;
+  new_posting?: string | null;
+  transfer_date?: string | null;
+  source_name?: string | null;
+  source_url?: string | null;
+}
+
+export interface WebSource {
+  title: string;
+  url: string;
+  source?: string | null;
+  published?: string | null;
+}
+
+export interface ChatAnswer {
+  answer: string;
+  sources: ChatSource[];
+  web_sources?: WebSource[];
+  from_web?: boolean;
+}
+
 export interface NewsQuery {
   page?: number;
   page_size?: number;

@@ -2,8 +2,8 @@
   "spreadsheet_id": "1-PEOwLkIl_LqxxF5ST6jZMrczmYNH6LYyc3avDRBjhE",
   "worksheet_name": "Transfers",
   "auto_export": false,
-  "llm_provider": "ollama",
+  "llm_provider": "openai",
   "llm_model": "",
   "discovery_interval_seconds": 600,
-  "openai_api_key": ""
+  "openai_api_key": "gAAAAABqOP1tsNjxXe2mcGWLssuAePpmNnj9N45njq_QiqFFQXk2THpVUYFGrvAeWD46Bm94pA5W-U5hnn-8tNmDJWB9B_WSAkUl3XYEqIy8dhTVybPdRPrCPehZ0njyGOfZta1IgLbAtDR-UfUWbb8IN4qt_kQitwkGk2Xcy9DPQyuEHsJJ8-Tv56pfAW240oTrWO6o2l72Vdd6RJdsffpbcL0T6GMHL9gvH0a7JvsziI_lgkiBsub2f1mdFPOECVK3kZV8rp4g0a3-FS_cMPyUKZDwCmNCfxGip0ulKVhGE6nFhziIMJI="
 }

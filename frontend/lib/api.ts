@@ -3,6 +3,7 @@ import type {
   Analytics,
   Article,
   AuthUser,
+  ChatAnswer,
   LoginResponse,
   ModelsResponse,
   NewsQuery,
@@ -176,6 +177,17 @@ export async function uploadCredentials(file: File): Promise<{ ok: boolean }> {
 
 export async function getModels(): Promise<ModelsResponse> {
   const { data } = await api.get<ModelsResponse>('/api/v1/settings/models');
+  return data;
+}
+
+// ---------- Assistant (RAG) ----------
+export async function askAssistant(question: string): Promise<ChatAnswer> {
+  // Local CPU generation can take a while — allow a generous timeout.
+  const { data } = await api.post<ChatAnswer>(
+    '/api/v1/chat/ask',
+    { question },
+    { timeout: 180000 },
+  );
   return data;
 }
 

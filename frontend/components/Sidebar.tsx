@@ -9,6 +9,7 @@ import {
   Newspaper,
   RefreshCw,
   Settings as SettingsIcon,
+  Sparkles,
   Radar,
   X,
 } from 'lucide-react';
@@ -17,6 +18,7 @@ import { cn } from '@/lib/utils';
 
 const nav = [
   { href: '/', label: 'Dashboard', icon: LayoutDashboard },
+  { href: '/assistant', label: 'Assistant', icon: Sparkles },
   { href: '/transfers', label: 'Transfer Explorer', icon: ArrowLeftRight },
   { href: '/analytics', label: 'Analytics', icon: BarChart3 },
   { href: '/news', label: 'News Feed', icon: Newspaper },

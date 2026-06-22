@@ -128,6 +128,62 @@ def complete_json(
     return _parse_json(content)
 
 
+@retry(stop=stop_after_attempt(3), wait=wait_exponential(min=2, max=20))
+def complete_text(
+    system_prompt: str,
+    user_prompt: str,
+    *,
+    provider: LLMProvider | None = None,
+    model: str | None = None,
+    temperature: float = 0.2,
+    max_tokens: int | None = None,
+    timeout: float | None = None,
+) -> str:
+    """Plain free-text chat completion (used by the RAG assistant)."""
+    provider = provider or active_provider()
+    model = model or active_model(provider)
+    client = _client(provider)
+    kwargs: dict[str, Any] = {
+        "model": model,
+        "temperature": temperature,
+        "max_tokens": max_tokens or settings.LLM_MAX_OUTPUT_TOKENS,
+        "messages": [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_prompt},
+        ],
+    }
+    if timeout is not None:
+        kwargs["timeout"] = timeout
+    if provider == "ollama":
+        kwargs["extra_body"] = {
+            "options": {"num_ctx": settings.OLLAMA_NUM_CTX},
+            "keep_alive": settings.OLLAMA_KEEP_ALIVE,
+        }
+    try:
+        resp = client.chat.completions.create(**kwargs)
+    except Exception as exc:  # noqa: BLE001
+        raise LLMError(f"Chat completion failed ({provider}/{model}): {exc}") from exc
+    return (resp.choices[0].message.content or "").strip()
+
+
+@retry(stop=stop_after_attempt(3), wait=wait_exponential(min=1, max=10))
+def embed_texts(texts: list[str]) -> list[list[float]]:
+    """Embed texts with the local Ollama embedding model.
+
+    Retrieval always runs locally/offline regardless of the chat provider.
+    """
+    from openai import OpenAI
+
+    if not texts:
+        return []
+    client = OpenAI(base_url=settings.OLLAMA_BASE_URL, api_key="ollama")
+    try:
+        resp = client.embeddings.create(model=settings.EMBED_MODEL, input=texts)
+    except Exception as exc:  # noqa: BLE001
+        raise LLMError(f"Embedding failed ({settings.EMBED_MODEL}): {exc}") from exc
+    return [d.embedding for d in resp.data]
+
+
 def _parse_json(content: str) -> dict[str, Any]:
     try:
         return json.loads(content)

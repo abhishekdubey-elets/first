@@ -93,6 +93,23 @@ class Settings(BaseSettings):
     ANTHROPIC_BASE_URL: str = "https://api.anthropic.com/v1/"
     ANTHROPIC_MODEL: str = "claude-opus-4-8"
 
+    # --- RAG chatbot -------------------------------------------------------
+    # Local embedding model (served by Ollama) used to semantically retrieve
+    # relevant transfer records for the assistant. Retrieval stays local even
+    # if the chat LLM is switched to OpenAI.
+    EMBED_MODEL: str = "nomic-embed-text"
+    CHAT_TOP_K: int = 8           # how many records to ground each answer on
+    CHAT_MAX_CONTEXT_CHARS: int = 6000
+    # The assistant uses a small/fast model for snappy answers (the retrieved
+    # records carry the facts). Falls back gracefully if it can't generate.
+    CHAT_MODEL: str = "llama3.2:3b"
+    CHAT_MAX_TOKENS: int = 800
+    CHAT_TIMEOUT_SECONDS: int = 75
+    # Below this best-semantic-similarity, the local data is considered to not
+    # cover the question and a live web search is used instead.
+    CHAT_MIN_SIM: float = 0.5
+    ENABLE_WEB_FALLBACK: bool = True
+
     # --- Multimodal / OCR --------------------------------------------------
     ENABLE_OCR: bool = True
     OCR_LANGUAGES: str = "eng+hin"

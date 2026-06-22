@@ -8,7 +8,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from app import __version__
-from app.api.routes import agents, auth, news, settings as settings_route, stats, sync, transfers
+from app.api.routes import agents, auth, chat, news, settings as settings_route, stats, sync, transfers
 from app.bootstrap import ensure_first_admin
 from app.core.config import settings
 from app.core.logging import configure_logging, get_logger
@@ -60,5 +60,5 @@ async def health():
 
 
 api = settings.API_V1_PREFIX
-for module in (auth, transfers, stats, news, sync, settings_route, agents):
+for module in (auth, transfers, stats, news, sync, settings_route, agents, chat):
     app.include_router(module.router, prefix=api)
