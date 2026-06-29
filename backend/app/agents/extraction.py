@@ -32,10 +32,16 @@ class ExtractionAgent(BaseAgent):
     def run(self, article: Article) -> bool:
         """Populate ``article`` with full text + media. Returns success."""
         url = article.url
+        # When we can't fetch the body (robots-blocked Google News links, fetch
+        # errors), fall back to the headline — it usually states the transfer
+        # ("Haryana Transfers 7 IAS Officers; Monika Malik Appointed…") and the
+        # enrichment agent fills the rest from a web search.
         if not self.allowed_by_robots(url):
+            if (article.title or "").strip():
+                return self._headline_only(article, "robots.txt")
             article.status = ArticleStatus.IRRELEVANT
-            article.error = "Disallowed by robots.txt"
-            self.audit("extract", f"Skipped (robots.txt): {url}",
+            article.error = "Disallowed by robots.txt (no title)"
+            self.audit("extract", f"Skipped (robots.txt, no title): {url}",
                        level=LogLevel.WARNING, article_id=article.id)
             return False
 
@@ -45,6 +51,8 @@ class ExtractionAgent(BaseAgent):
             html = resp.text
             final_url = str(resp.url)
         except Exception as exc:  # noqa: BLE001
+            if (article.title or "").strip():
+                return self._headline_only(article, f"fetch failed: {exc}")
             article.status = ArticleStatus.FAILED
             article.error = f"Fetch failed: {exc}"
             self.audit("extract", f"Fetch failed: {url}", level=LogLevel.ERROR,
@@ -63,7 +71,12 @@ class ExtractionAgent(BaseAgent):
                 if ocr_text.strip():
                     text += f"\n\n[GOVERNMENT ORDER PDF: {pdf}]\n{ocr_text}"
 
-        article.full_text = (text or article.title or "")[:60000]
+        # If the page body is thin (e.g. a redirect stub), prepend the headline
+        # so the LLM still has the transfer statement to work with.
+        body = (text or "").strip()
+        if len(body) < 200 and (article.title or "").strip():
+            body = (article.title + "\n" + body).strip()
+        article.full_text = (body or article.title or "")[:60000]
         article.images = images[:20]
         article.pdf_links = pdfs[:20]
         article.gov_order_links = list(dict.fromkeys(gov_links))[:20]
@@ -73,6 +86,19 @@ class ExtractionAgent(BaseAgent):
         self.audit("extract", f"Extracted {len(article.full_text)} chars: {final_url}",
                    article_id=article.id, chars=len(article.full_text),
                    pdfs=len(pdfs), gov_links=len(gov_links))
+        return True
+
+    def _headline_only(self, article: Article, reason: str) -> bool:
+        """Use the article's headline as the text when the body is unavailable."""
+        article.full_text = (article.title or "")[:60000]
+        article.images = []
+        article.pdf_links = []
+        article.gov_order_links = []
+        article.relevance_score = source_weight(article.source_name, article.url)
+        article.status = ArticleStatus.EXTRACTED
+        article.error = f"headline-only ({reason})"
+        self.audit("extract", f"Headline-only extraction ({reason}): {article.url}",
+                   article_id=article.id, chars=len(article.full_text))
         return True
 
     def _parse_html(self, html: str, base_url: str):

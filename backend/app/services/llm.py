@@ -1,15 +1,13 @@
-"""Unified LLM client.
+"""Unified LLM client (cloud).
 
-A single OpenAI-compatible code path serves three providers:
+A single OpenAI-compatible code path serves two providers:
 
-* ``ollama``    — a local open-source model (default; no API key, fully offline).
-                  This mirrors the local-model setup used by the sibling
-                  transcript dashboard.
-* ``openai``    — GPT via the OpenAI API.
+* ``openai``    — GPT via the OpenAI API (default).
 * ``anthropic`` — Claude via Anthropic's OpenAI-compatible endpoint (optional).
 
-The active provider/model is chosen from ``settings`` but can be overridden per
-call (e.g. from the Settings page) by passing ``provider``/``model``.
+Embeddings (for RAG retrieval) use OpenAI's embedding model. The active
+provider/model is chosen from ``settings`` but can be overridden per call
+(e.g. from the Settings page) by passing ``provider``/``model``.
 """
 from __future__ import annotations
 
@@ -36,10 +34,7 @@ def _openai_key() -> str:
 
 
 def active_provider() -> LLMProvider:
-    """The effective provider: runtime-selected (Settings page) else env default.
-
-    With no OpenAI key supplied this stays ``ollama`` — the original behaviour.
-    """
+    """The effective provider: runtime-selected (Settings page) else env default."""
     from app.services.app_settings import get_export_config
 
     return get_export_config().get("llm_provider") or settings.LLM_PROVIDER
@@ -47,8 +42,6 @@ def active_provider() -> LLMProvider:
 
 def is_available(provider: LLMProvider | None = None) -> bool:
     provider = provider or active_provider()
-    if provider == "ollama":
-        return True  # assumed reachable; call fails loudly if not
     if provider == "openai":
         return bool(_openai_key())
     if provider == "anthropic":
@@ -59,7 +52,6 @@ def is_available(provider: LLMProvider | None = None) -> bool:
 def active_model(provider: LLMProvider | None = None) -> str:
     provider = provider or active_provider()
     return {
-        "ollama": settings.OLLAMA_MODEL,
         "openai": settings.OPENAI_MODEL,
         "anthropic": settings.ANTHROPIC_MODEL,
     }[provider]
@@ -68,8 +60,6 @@ def active_model(provider: LLMProvider | None = None) -> str:
 def _client(provider: LLMProvider):
     from openai import OpenAI
 
-    if provider == "ollama":
-        return OpenAI(base_url=settings.OLLAMA_BASE_URL, api_key="ollama")
     if provider == "openai":
         key = _openai_key()
         if not key:
@@ -110,14 +100,9 @@ def complete_json(
             {"role": "user", "content": user_prompt},
         ],
     }
-    # response_format JSON mode is supported by OpenAI and Ollama; Anthropic's
-    # compat layer ignores unknown fields gracefully.
+    # response_format JSON mode is supported by OpenAI; Anthropic's compat layer
+    # ignores unknown fields gracefully.
     kwargs["response_format"] = {"type": "json_object"}
-    if provider == "ollama":
-        kwargs["extra_body"] = {
-            "options": {"num_ctx": settings.OLLAMA_NUM_CTX},
-            "keep_alive": settings.OLLAMA_KEEP_ALIVE,
-        }
 
     try:
         resp = client.chat.completions.create(**kwargs)
@@ -154,11 +139,6 @@ def complete_text(
     }
     if timeout is not None:
         kwargs["timeout"] = timeout
-    if provider == "ollama":
-        kwargs["extra_body"] = {
-            "options": {"num_ctx": settings.OLLAMA_NUM_CTX},
-            "keep_alive": settings.OLLAMA_KEEP_ALIVE,
-        }
     try:
         resp = client.chat.completions.create(**kwargs)
     except Exception as exc:  # noqa: BLE001
@@ -168,15 +148,15 @@ def complete_text(
 
 @retry(stop=stop_after_attempt(3), wait=wait_exponential(min=1, max=10))
 def embed_texts(texts: list[str]) -> list[list[float]]:
-    """Embed texts with the local Ollama embedding model.
-
-    Retrieval always runs locally/offline regardless of the chat provider.
-    """
+    """Embed texts with the OpenAI embedding model (used for RAG retrieval)."""
     from openai import OpenAI
 
     if not texts:
         return []
-    client = OpenAI(base_url=settings.OLLAMA_BASE_URL, api_key="ollama")
+    key = _openai_key()
+    if not key:
+        raise LLMError("OPENAI_API_KEY is not configured (needed for embeddings).")
+    client = OpenAI(api_key=key)
     try:
         resp = client.embeddings.create(model=settings.EMBED_MODEL, input=texts)
     except Exception as exc:  # noqa: BLE001

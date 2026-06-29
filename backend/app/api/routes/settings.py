@@ -72,8 +72,6 @@ async def available_models(_: object = Depends(get_current_user)):
     """Which providers are usable given the current env (for the model picker)."""
     return {
         "providers": [
-            {"id": "ollama", "label": "Local (Ollama, open-source)",
-             "available": llm.is_available("ollama"), "model": env_settings.OLLAMA_MODEL},
             {"id": "openai", "label": "OpenAI GPT",
              "available": llm.is_available("openai"), "model": env_settings.OPENAI_MODEL},
             {"id": "anthropic", "label": "Anthropic Claude",

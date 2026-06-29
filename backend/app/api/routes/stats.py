@@ -68,6 +68,7 @@ async def analytics(
     )).all()
     by_district = (await db.execute(
         select(IasTransfer.new_district, func.count())
+        .where(IasTransfer.new_district.is_not(None))
         .group_by(IasTransfer.new_district).order_by(func.count().desc()).limit(20)
     )).all()
     # Group/order by the SAME expression used in SELECT. Postgres can't match a
@@ -85,6 +86,6 @@ async def analytics(
     return {
         "by_state": [{"state": s or "Unknown", "count": n} for s, n in by_state],
         "by_cadre": [{"cadre": c or "Unknown", "count": n} for c, n in by_cadre],
-        "by_district": [{"district": d or "Unknown", "count": n} for d, n in by_district],
+        "by_district": [{"district": d, "count": n} for d, n in by_district],
         "by_month": [{"month": m, "count": n} for m, n in by_month],
     }

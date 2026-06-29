@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends
-from sqlalchemy import func, select
+from sqlalchemy import func, nullslast, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import Pagination, get_current_user
@@ -26,8 +26,13 @@ async def list_news(
     total = (await db.execute(
         select(func.count()).select_from(stmt.subquery())
     )).scalar_one()
+    # Latest news first: by the article's publication date (newest), with
+    # articles lacking one ordered last by discovery time.
     rows = (await db.execute(
-        stmt.order_by(Article.created_at.desc()).offset(pg.offset).limit(pg.page_size)
+        stmt.order_by(
+            nullslast(Article.published_at.desc()),
+            Article.created_at.desc(),
+        ).offset(pg.offset).limit(pg.page_size)
     )).scalars().all()
     return {
         "items": [ArticleOut.model_validate(r) for r in rows],

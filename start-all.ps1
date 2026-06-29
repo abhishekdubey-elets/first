@@ -18,8 +18,6 @@ $Root     = 'C:\Users\User\Desktop\abhi\first'
 $Backend  = Join-Path $Root 'backend'
 $Frontend = Join-Path $Root 'frontend'
 $Py       = Join-Path $Backend '.venv\Scripts\python.exe'
-$Redis    = 'C:\Users\User\redis\redis-server.exe'
-$Ollama   = Join-Path $env:LOCALAPPDATA 'Programs\Ollama\ollama.exe'
 
 function Test-Port([int]$Port) {
     try {
@@ -34,8 +32,7 @@ function Test-Port([int]$Port) {
 
 function Start-InWindow([string]$Title, [string]$WorkDir, [string]$Command) {
     $inner = "`$host.UI.RawUI.WindowTitle='$Title'; Set-Location '$WorkDir'; " +
-             "`$env:PYTHONUTF8='1'; `$env:PYTHONIOENCODING='utf-8'; " +
-             "`$env:TESSDATA_PREFIX='C:\Users\User\tessdata'; $Command"
+             "`$env:PYTHONUTF8='1'; `$env:PYTHONIOENCODING='utf-8'; $Command"
     Start-Process powershell -ArgumentList '-NoExit', '-Command', $inner
 }
 
@@ -51,29 +48,13 @@ if (-not $pg) {
     Write-Host 'Postgres: running' -ForegroundColor Green
 }
 
-# 2. Redis
-if (Test-Port 6379) {
-    Write-Host 'Redis: already running (6379)' -ForegroundColor Green
-} elseif (Test-Path $Redis) {
-    Start-Process -FilePath $Redis -ArgumentList '--port', '6379' -WindowStyle Minimized
-    Write-Host 'Redis: started (6379)' -ForegroundColor Green
-} else {
-    Write-Host "Redis: not found at $Redis" -ForegroundColor Yellow
-}
-
-# 3. Ollama (local LLM)
-if (Test-Port 11434) {
-    Write-Host 'Ollama: already running (11434)' -ForegroundColor Green
-} elseif (Test-Path $Ollama) {
-    Start-Process -FilePath $Ollama -ArgumentList 'serve' -WindowStyle Minimized
-    Write-Host 'Ollama: started (11434)' -ForegroundColor Green
-} else {
-    Write-Host 'Ollama: not found — LLM extraction will be unavailable.' -ForegroundColor Yellow
-}
+# 2. LLM is OpenAI (cloud) — make sure OPENAI_API_KEY is set in backend/.env.
+Write-Host 'LLM: OpenAI (set OPENAI_API_KEY in backend/.env or the Settings page)' -ForegroundColor Green
+Write-Host 'No Redis/Celery — discovery runs in-process via /api/v1/agents/run-cycle' -ForegroundColor Green
 
 Start-Sleep -Seconds 2
 
-# 4. FastAPI backend
+# 3. FastAPI backend
 if (Test-Port 8000) {
     Write-Host 'API: already running (8000)' -ForegroundColor Green
 } else {
@@ -81,15 +62,7 @@ if (Test-Port 8000) {
     Write-Host 'API: starting (8000)' -ForegroundColor Green
 }
 
-# 5. Celery worker (Windows requires --pool=solo)
-Start-InWindow 'IAS Worker' $Backend "& '$Py' -m celery -A app.workers.celery_app.celery worker --loglevel=info --pool=solo"
-Write-Host 'Celery worker: starting' -ForegroundColor Green
-
-# 6. Celery beat (10-min discovery cadence)
-Start-InWindow 'IAS Beat' $Backend "& '$Py' -m celery -A app.workers.celery_app.celery beat --loglevel=info"
-Write-Host 'Celery beat: starting' -ForegroundColor Green
-
-# 7. Next.js frontend
+# 4. Next.js frontend
 if (Test-Port 3001) {
     Write-Host 'Frontend: already running (3001)' -ForegroundColor Green
 } else {
@@ -101,4 +74,5 @@ Write-Host ''
 Write-Host 'Dashboard:  http://localhost:3001' -ForegroundColor Cyan
 Write-Host 'API docs:   http://localhost:8000/docs' -ForegroundColor Cyan
 Write-Host 'Login:      admin@digitallearning.in / ChangeMe123!' -ForegroundColor Cyan
+Write-Host 'Run discovery: click "Run agents now" in the UI (or POST /api/v1/agents/run-cycle).' -ForegroundColor DarkGray
 Write-Host '(Give the API/frontend ~10s to finish booting.)' -ForegroundColor DarkGray

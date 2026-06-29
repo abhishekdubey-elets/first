@@ -27,6 +27,12 @@ class Base(DeclarativeBase):
     """Declarative base for all ORM models."""
 
 
+# Managed Postgres (Supabase/Neon) requires TLS. asyncpg takes ssl="require";
+# psycopg2 takes sslmode="require".
+_async_connect_args = {"ssl": "require"} if settings.DB_SSL else {}
+_sync_connect_args = {"sslmode": "require"} if settings.DB_SSL else {}
+
+
 # --- Async (API) -----------------------------------------------------------
 async_engine = create_async_engine(
     settings.DATABASE_URL,
@@ -34,6 +40,7 @@ async_engine = create_async_engine(
     pool_size=10,
     max_overflow=20,
     echo=False,
+    connect_args=_async_connect_args,
 )
 
 AsyncSessionFactory = async_sessionmaker(
@@ -59,6 +66,7 @@ sync_engine = create_engine(
     pool_size=5,
     max_overflow=10,
     echo=False,
+    connect_args=_sync_connect_args,
 )
 
 sync_session_factory: sessionmaker[Session] = sessionmaker(

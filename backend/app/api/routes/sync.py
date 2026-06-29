@@ -1,7 +1,7 @@
 """Google Sheets Sync page: status, manual export, retry failed."""
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, BackgroundTasks, Depends
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -55,18 +55,19 @@ async def sync_status(
 
 @router.post("/retry")
 async def retry_failed(
+    background: BackgroundTasks,
     db: AsyncSession = Depends(get_db),
     _: object = Depends(require_admin),
 ):
-    """Re-queue failed exports by resetting them to VERIFIED for the next run."""
+    """Re-queue failed exports by resetting them to VERIFIED, then re-export."""
     rows = (await db.execute(
         select(IasTransfer).where(IasTransfer.status == TransferStatus.EXPORT_FAILED)
     )).scalars().all()
     for r in rows:
         r.status = TransferStatus.VERIFIED
     await db.commit()
-    # Kick a dedicated Sheets export pass in the background.
+    # Run a dedicated Sheets export pass in the background (no Celery).
     from app.workers.tasks import export_verified
 
-    export_verified.delay()
+    background.add_task(export_verified)
     return {"requeued": len(rows)}

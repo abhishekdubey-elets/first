@@ -21,11 +21,14 @@ import { EmptyState } from '@/components/EmptyState';
 import { CardSkeleton, TableSkeleton, Skeleton } from '@/components/Skeleton';
 import { fmtDate, fmtRelative, fmtNumber, safeDate } from '@/lib/format';
 
+// Shown when a field is empty even after the enrichment agent's web search.
+const NO_INFO = <span className="italic text-slate-600">no info</span>;
+
 export default function DashboardPage() {
   const statsQ = useQuery<Stats>({ queryKey: ['stats'], queryFn: getStats });
   const transfersQ = useQuery({
-    queryKey: ['transfers', { page_size: 8 }],
-    queryFn: () => getTransfers({ page_size: 8, sort: 'created_at', order: 'desc' }),
+    queryKey: ['transfers', { page_size: 8, sort: 'news_date' }],
+    queryFn: () => getTransfers({ page_size: 8, sort: 'news_date', order: 'desc' }),
   });
   const newsQ = useQuery({
     queryKey: ['news', { page_size: 6 }],
@@ -52,7 +55,7 @@ export default function DashboardPage() {
       header: 'From',
       render: (r) => (
         <span className="text-slate-300">
-          {r.previous_district || r.previous_posting || '—'}
+          {r.previous_district || r.previous_posting || NO_INFO}
         </span>
       ),
     },
@@ -61,11 +64,11 @@ export default function DashboardPage() {
       header: 'To',
       render: (r) => (
         <span className="text-slate-300">
-          {r.new_district || r.new_posting || '—'}
+          {r.new_district || r.new_posting || NO_INFO}
         </span>
       ),
     },
-    { key: 'state', header: 'State', render: (r) => r.state || '—' },
+    { key: 'state', header: 'State', render: (r) => r.state || NO_INFO },
     {
       key: 'date',
       header: 'Date',
@@ -85,7 +88,7 @@ export default function DashboardPage() {
             </span>
           );
         }
-        return <span className="text-slate-500">—</span>;
+        return NO_INFO;
       },
     },
     {

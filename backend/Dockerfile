@@ -1,36 +1,35 @@
 # syntax=docker/dockerfile:1
-FROM python:3.12-slim AS base
+# Backend image for the IAS Transfer Intelligence API.
+# Runs the FastAPI app only — no Celery/Redis (discovery runs in-process,
+# triggered by a cron hitting /api/v1/agents/run-cycle). LLM is OpenAI (cloud).
+# Suitable for Hugging Face Docker Spaces (listens on $PORT, default 7860).
+FROM python:3.12-slim
 
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
     PIP_NO_CACHE_DIR=1 \
-    PIP_DISABLE_PIP_VERSION_CHECK=1
-
-# System deps:
-#  - tesseract-ocr (+ hindi data) and poppler-utils power multimodal OCR of
-#    scanned government-order PDFs/images.
-#  - gcc/curl for building wheels and the healthcheck.
-RUN apt-get update && apt-get install -y --no-install-recommends \
-        tesseract-ocr \
-        tesseract-ocr-hin \
-        poppler-utils \
-        gcc \
-        curl \
-    && rm -rf /var/lib/apt/lists/*
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    PORT=7860 \
+    STORAGE_DIR=/app/data/storage \
+    GOOGLE_CREDENTIALS_FILE=/app/data/secrets/google-credentials.json
 
 WORKDIR /app
 
+# All Python deps ship manylinux wheels (psycopg2-binary, asyncpg, lxml,
+# Pillow, cryptography) so no compiler/system libs are needed. OCR binaries
+# (tesseract/poppler) are intentionally omitted — OCR is off by default and
+# isn't available on serverless hosts anyway.
 COPY requirements.txt .
 RUN pip install -r requirements.txt
 
 COPY . .
 
-RUN mkdir -p /data/storage /data/secrets && chmod +x /app/scripts/entrypoint.sh
+# Writable data dirs (ephemeral on Spaces; the DB is external/Supabase).
+RUN mkdir -p /app/data/storage /app/data/secrets \
+    && chmod -R 777 /app/data \
+    && chmod +x /app/scripts/entrypoint.sh
 
-EXPOSE 8000
-
-HEALTHCHECK --interval=30s --timeout=5s --start-period=25s --retries=3 \
-    CMD curl -fsS http://localhost:8000/health || exit 1
+EXPOSE 7860
 
 ENTRYPOINT ["/app/scripts/entrypoint.sh"]
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-7860}

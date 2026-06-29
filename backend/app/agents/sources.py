@@ -26,6 +26,9 @@ SEARCH_KEYWORDS_HI = [
 # Direct RSS feeds from trusted outlets / portals. Discovery pulls these too,
 # then filters headlines by keyword before queuing for extraction.
 RSS_FEEDS = [
+    # IAS/bureaucracy-focused outlets — direct article URLs with full text
+    # (unlike Google News links, which are robots-blocked stubs).
+    ("Indian Masterminds", "https://indianmasterminds.com/feed/"),
     ("PIB", "https://pib.gov.in/RssMain.aspx?ModId=6&Lang=1&Regid=3"),
     ("The Hindu - National", "https://www.thehindu.com/news/national/feeder/default.rss"),
     ("Indian Express - India", "https://indianexpress.com/section/india/feed/"),

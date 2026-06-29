@@ -6,7 +6,7 @@ import { useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   Menu,
   Search,
-  Sparkles,
+  RefreshCw,
   LogOut,
   Loader2,
   CheckCircle2,
@@ -77,16 +77,17 @@ export function Topbar({ onMenu }: { onMenu: () => void }) {
             onClick={() => runMutation.mutate()}
             disabled={runMutation.isPending}
             className="btn-gradient px-3 py-2 sm:px-4"
+            title="Crawl the latest IAS transfer news now"
           >
             {runMutation.isPending ? (
               <Loader2 className="h-4 w-4 animate-spin" />
             ) : justRan ? (
               <CheckCircle2 className="h-4 w-4" />
             ) : (
-              <Sparkles className="h-4 w-4" />
+              <RefreshCw className="h-4 w-4" />
             )}
             <span className="hidden sm:inline">
-              {justRan ? 'Queued' : 'Run agents now'}
+              {runMutation.isPending ? 'Crawling…' : justRan ? 'Started' : 'Crawl now'}
             </span>
           </button>
 

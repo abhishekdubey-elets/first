@@ -12,18 +12,78 @@ import json
 from app.agents.base import BaseAgent
 from app.agents.sources import source_weight
 from app.core.config import settings
+from app.core.india import canonical_state
 from app.models.article import Article
 from app.models.enums import ArticleStatus, LogLevel
 from app.schemas.transfer import ExtractedTransfer, ExtractionResult
 from app.services import llm
+
+# Values models sometimes wrongly drop into district/posting fields — these are
+# the order's nature or generic labels, not real places/titles. Nulled out so
+# the dashboard's From/To columns never show them.
+_PLACEHOLDERS = {
+    "new posting", "previous posting", "current posting", "present posting",
+    "posting", "new district", "previous district", "new role", "same posting",
+    "extension of service", "extension of service period", "service extension",
+    "extension", "promotion", "promoted", "transfer", "transferred",
+    "transfer order", "reshuffle", "repatriation", "repatriated", "deputation",
+    "awaiting posting", "posting awaited", "await posting", "not specified",
+    "not mentioned", "not available", "na", "n/a", "tba", "to be decided",
+    "to be determined", "unknown", "none", "nil", "new", "district", "officer",
+    "ias officer", "same", "no change", "vacant",
+}
+
+
+def _clean_field(v: str | None) -> str | None:
+    """Null out generic-label / order-nature junk in a place/title field."""
+    if not v:
+        return None
+    s = v.strip()
+    norm = s.lower().rstrip(" .,:;-–—")
+    if not norm or norm in _PLACEHOLDERS:
+        return None
+    return s
+
+
+def _sanitize(t: ExtractedTransfer) -> ExtractedTransfer:
+    t.previous_posting = _clean_field(t.previous_posting)
+    t.new_posting = _clean_field(t.new_posting)
+    # If a district is actually a state name, promote it to state (if empty) and
+    # null the district so state names never count as districts.
+    for fld in ("previous_district", "new_district"):
+        raw = _clean_field(getattr(t, fld))
+        if raw and canonical_state(raw):
+            if not t.state:
+                t.state = canonical_state(raw)
+            raw = None
+        setattr(t, fld, raw)
+    # A "from == to" is a no-op move (hallucinated) — drop the previous side.
+    if t.previous_district and t.new_district and \
+            t.previous_district.strip().lower() == t.new_district.strip().lower():
+        t.previous_district = None
+    if t.previous_posting and t.new_posting and \
+            t.previous_posting.strip().lower() == t.new_posting.strip().lower():
+        t.previous_posting = None
+    return t
+
 
 SYSTEM_PROMPT = (
     "You are a precise civil-service news analyst specialising in Indian "
     "Administrative Service (IAS) officer transfers and postings. You read news "
     "articles and government orders and extract STRUCTURED data about officer "
     "transfers. Rules:\n"
-    "1. Only extract real IAS/administrative transfer information actually stated "
-    "in the text. NEVER invent or hallucinate.\n"
+    "1. SCOPE — extract transfers / postings / appointments of Indian **IAS "
+    "(Indian Administrative Service)** (or Indian administrative/state-cadre) "
+    "officers. Set is_transfer_news=false ONLY when the article is clearly NOT "
+    "that: it is about a foreign country or official (e.g. Bangladesh, Sylhet, "
+    "Nepal), a non-IAS service, a university/college/company appointment, or a "
+    "non-posting event (vigilance raid, arrest, probe, award, death). If it "
+    "plausibly concerns an Indian officer's posting, INCLUDE it even when details "
+    "are sparse — leave unknown fields null rather than dropping the record. Only "
+    "extract information actually stated; NEVER hallucinate.\n"
+    "1a. Any state/cadre you DO report must be an Indian state/UT; if the only "
+    "location mentioned is clearly foreign (e.g. Sylhet), treat the article as "
+    "out of scope. A missing/unknown state is fine — keep the record, state=null.\n"
     "2. Capture the officer's PREVIOUS posting and district whenever the text "
     "implies them — e.g. 'transferred from <place>', 'currently <role>', "
     "'<District> Collector/DM', 'replacing / in place of / vice <officer>', "
@@ -34,6 +94,13 @@ SYSTEM_PROMPT = (
     "strings such as 'TBA', 'NA', 'N/A', 'Not specified', 'Unknown', 'to be "
     "decided', 'with immediate effect', or their Hindi equivalents (e.g. "
     "'निर्धारित नहीं') — use null instead.\n"
+    "3a. *_district fields must be an actual PLACE (district/city/state) and "
+    "*_posting fields an actual office/role TITLE. NEVER put the order's nature or "
+    "a generic label in them — e.g. 'New posting', 'Extension of service', "
+    "'Promotion', 'Transfer', 'Repatriation', 'Reshuffle', 'Awaiting posting' are "
+    "NOT places or titles → use null. Never copy the destination into the "
+    "previous_* fields; if the prior place/role isn't stated, previous_* = null. "
+    "previous and new must differ — never output the same value for both.\n"
     "4. Dates: copy a date only if an actual calendar date is given (any format is "
     "fine, copy it verbatim). If no concrete date is stated, return null for that "
     "date field — never a placeholder.\n"
@@ -116,6 +183,10 @@ class InformationAgent(BaseAgent):
         for t in result.transfers:
             if not (t.officer_name and t.officer_name.strip()):
                 continue
+            _sanitize(t)  # strip label/order-nature junk from place/title fields
+            # Normalise the cadre state to a canonical Indian state/UT; a value
+            # that isn't one (e.g. "Sylhet") is dropped as non-Indian.
+            t.state = canonical_state(t.state)
             t.confidence_score = round(0.6 * t.confidence_score + 0.4 * weight, 3)
             if not t.gov_order_link and article.gov_order_links:
                 t.gov_order_link = article.gov_order_links[0]

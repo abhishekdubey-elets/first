@@ -169,7 +169,7 @@ export interface TransfersQuery {
   cadre?: string;
   source?: string;
   status?: string;
-  sort?: 'created_at' | 'transfer_date' | 'officer';
+  sort?: 'news_date' | 'created_at' | 'transfer_date' | 'officer';
   order?: 'asc' | 'desc';
 }
 

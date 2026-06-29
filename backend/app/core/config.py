@@ -12,10 +12,9 @@ from typing import Literal
 from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-# "ollama"    -> a local open-source LLM served by Ollama (no API key, offline)
-# "openai"    -> GPT via the OpenAI API
+# "openai"    -> GPT via the OpenAI API (default — cloud, deployment friendly)
 # "anthropic" -> Claude via Anthropic's OpenAI-compatible endpoint (optional)
-LLMProvider = Literal["ollama", "openai", "anthropic"]
+LLMProvider = Literal["openai", "anthropic"]
 
 _BACKEND_DIR = Path(__file__).resolve().parents[2]
 _ROOT_DIR = _BACKEND_DIR.parent
@@ -53,14 +52,17 @@ class Settings(BaseSettings):
     DATABASE_URL_SYNC: str = (
         "postgresql+psycopg2://ias:ias_password@localhost:5432/ias_transfers"
     )
+    # Require TLS to the database. Set true for managed Postgres (Supabase/Neon).
+    DB_SSL: bool = False
 
-    # --- Redis / Celery ----------------------------------------------------
-    REDIS_URL: str = "redis://localhost:6379/0"
-    CELERY_BROKER_URL: str = "redis://localhost:6379/1"
-    CELERY_RESULT_BACKEND: str = "redis://localhost:6379/2"
+    # --- Scheduling --------------------------------------------------------
+    # Shared secret for the cron-triggered discovery endpoint
+    # (POST /api/v1/agents/run-cycle with an `x-cron-token` header). Set this in
+    # the deployment and in the Supabase pg_cron job. No Redis/Celery needed.
+    CRON_TOKEN: str = ""
 
     # --- Discovery ---------------------------------------------------------
-    # The News Discovery Agent runs on this cadence (seconds). 600 = 10 minutes.
+    # Suggested cron cadence (seconds) for the discovery cycle. 600 = 10 minutes.
     DISCOVERY_INTERVAL_SECONDS: int = 600
     DISCOVERY_LOOKBACK_HOURS: int = 24
     DISCOVERY_MAX_ARTICLES_PER_RUN: int = 80
@@ -73,18 +75,12 @@ class Settings(BaseSettings):
     RESPECT_ROBOTS_TXT: bool = True
 
     # --- LLM / extraction --------------------------------------------------
-    LLM_PROVIDER: LLMProvider = "ollama"
+    LLM_PROVIDER: LLMProvider = "openai"
     LLM_TEMPERATURE: float = 0.1
-    LLM_MAX_OUTPUT_TOKENS: int = 1200
+    LLM_MAX_OUTPUT_TOKENS: int = 4000
     LLM_MAX_INPUT_CHARS: int = 16000
 
-    # Ollama (default, open-source, offline)
-    OLLAMA_BASE_URL: str = "http://localhost:11434/v1"
-    OLLAMA_MODEL: str = "llama3.2:3b"
-    OLLAMA_NUM_CTX: int = 8192
-    OLLAMA_KEEP_ALIVE: str = "30m"
-
-    # OpenAI (optional)
+    # OpenAI (default). Set OPENAI_API_KEY via env or the dashboard Settings page.
     OPENAI_API_KEY: str = ""
     OPENAI_MODEL: str = "gpt-4.1-mini"
 
@@ -94,28 +90,26 @@ class Settings(BaseSettings):
     ANTHROPIC_MODEL: str = "claude-opus-4-8"
 
     # --- RAG chatbot -------------------------------------------------------
-    # Local embedding model (served by Ollama) used to semantically retrieve
-    # relevant transfer records for the assistant. Retrieval stays local even
-    # if the chat LLM is switched to OpenAI.
-    EMBED_MODEL: str = "nomic-embed-text"
+    # OpenAI embedding model used to semantically retrieve relevant transfer
+    # records for the assistant.
+    EMBED_MODEL: str = "text-embedding-3-small"
     CHAT_TOP_K: int = 8           # how many records to ground each answer on
     CHAT_MAX_CONTEXT_CHARS: int = 6000
-    # The assistant uses a small/fast model for snappy answers (the retrieved
-    # records carry the facts). Falls back gracefully if it can't generate.
-    CHAT_MODEL: str = "llama3.2:3b"
+    # The assistant uses the configured chat model (OPENAI_MODEL by default).
+    # Falls back gracefully if it can't generate.
     CHAT_MAX_TOKENS: int = 800
-    CHAT_TIMEOUT_SECONDS: int = 75
+    CHAT_TIMEOUT_SECONDS: int = 60
     # Below this best-semantic-similarity, the local data is considered to not
     # cover the question and a live web search is used instead.
     CHAT_MIN_SIM: float = 0.5
     ENABLE_WEB_FALLBACK: bool = True
 
     # --- Multimodal / OCR --------------------------------------------------
-    ENABLE_OCR: bool = True
+    # OCR needs the Tesseract + Poppler system binaries, which aren't available
+    # on serverless/Vercel — off by default. Enable only on a self-hosted backend
+    # that has those binaries (and set the paths below). Fails soft when missing.
+    ENABLE_OCR: bool = False
     OCR_LANGUAGES: str = "eng+hin"
-    # Optional explicit paths to the Tesseract binary and the Poppler "bin"
-    # folder. Leave blank to rely on PATH (the default in the Docker image).
-    # On a native Windows install they point at the per-user install dirs.
     TESSERACT_CMD: str = ""
     POPPLER_PATH: str = ""
 

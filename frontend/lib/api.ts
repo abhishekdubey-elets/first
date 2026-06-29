@@ -202,15 +202,12 @@ export async function updateOpenAiKey(
 }
 
 // ---------- Agents ----------
-export async function runAgents(): Promise<{ queued: boolean; task_id: string }> {
+export async function runAgents(): Promise<{ started: boolean }> {
   const { data } = await api.post('/api/v1/agents/run');
   return data;
 }
 
-export async function discoverAgents(): Promise<{
-  queued: boolean;
-  task_id: string;
-}> {
+export async function discoverAgents(): Promise<{ started: boolean }> {
   const { data } = await api.post('/api/v1/agents/discover');
   return data;
 }
