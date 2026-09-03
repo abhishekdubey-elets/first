@@ -1,25 +1,27 @@
 # =============================================================================
 # start-all.ps1 — one-command launcher for the IAS Transfer Intelligence stack
 # =============================================================================
-# Brings up: PostgreSQL (check) + Redis + Ollama + FastAPI API + Celery worker
-# + Celery beat + Next.js frontend. Each app runs in its OWN window so it keeps
-# running independently of any terminal/session and you can watch its logs.
+# Brings up: PostgreSQL (check only) + FastAPI API (port 8000, with the
+# discovery pipeline running in-process on its hourly scheduler) + Next.js
+# frontend (port 3001). Each app runs in its OWN window so it keeps running
+# independently of this terminal and you can watch its logs.
 #
 #   Run:    powershell -ExecutionPolicy Bypass -File .\start-all.ps1
-#   Stop:   close the individual windows (or run stop-all.ps1).
+#   Stop:   powershell -ExecutionPolicy Bypass -File .\stop-all.ps1
 #
-# Safe to re-run: services with a fixed port (Redis 6379, Ollama 11434, API
-# 8000, frontend 3001) are skipped if already up. Worker/beat have no port, so
-# only run this when they are NOT already running (else you double them up).
+# Prerequisites: backend\.venv created with `pip install -r requirements.txt`,
+# `npm install` done in frontend\, and a .env (repo root or backend\) pointing
+# DATABASE_URL / DATABASE_URL_SYNC at your Postgres with OPENAI_API_KEY set.
+#
+# Safe to re-run: the API (8000) and frontend (3001) are skipped if their port
+# is already in use.
 # =============================================================================
 $ErrorActionPreference = 'Stop'
 
-$Root     = 'C:\Users\User\Desktop\abhi\first'
+$Root     = $PSScriptRoot
 $Backend  = Join-Path $Root 'backend'
 $Frontend = Join-Path $Root 'frontend'
 $Py       = Join-Path $Backend '.venv\Scripts\python.exe'
-$Redis    = 'C:\Users\User\redis\redis-server.exe'
-$Ollama   = Join-Path $env:LOCALAPPDATA 'Programs\Ollama\ollama.exe'
 
 function Test-Port([int]$Port) {
     try {
@@ -34,62 +36,39 @@ function Test-Port([int]$Port) {
 
 function Start-InWindow([string]$Title, [string]$WorkDir, [string]$Command) {
     $inner = "`$host.UI.RawUI.WindowTitle='$Title'; Set-Location '$WorkDir'; " +
-             "`$env:PYTHONUTF8='1'; `$env:PYTHONIOENCODING='utf-8'; " +
-             "`$env:TESSDATA_PREFIX='C:\Users\User\tessdata'; $Command"
+             "`$env:PYTHONUTF8='1'; `$env:PYTHONIOENCODING='utf-8'; $Command"
     Start-Process powershell -ArgumentList '-NoExit', '-Command', $inner
 }
 
 Write-Host '== IAS Transfer Intelligence — launcher ==' -ForegroundColor Cyan
 
-# 1. PostgreSQL (installed Windows service — should already auto-start)
-$pg = Get-Service -Name 'postgresql-x64-18' -ErrorAction SilentlyContinue
+# 1. PostgreSQL — warning only. The Windows service name varies by installer
+#    (postgresql-x64-16, postgresql-x64-18, ...); you may also be using
+#    Docker or Supabase, in which case no local service is expected.
+$pg = Get-Service -Name 'postgresql*' -ErrorAction SilentlyContinue | Select-Object -First 1
 if (-not $pg) {
-    Write-Host 'Postgres: service postgresql-x64-18 not found!' -ForegroundColor Red
+    if (Test-Port 5432) {
+        Write-Host 'Postgres: something is listening on 5432 (no Windows service found)' -ForegroundColor Green
+    } else {
+        Write-Host 'Postgres: no local service found and nothing on 5432 — make sure DATABASE_URL points at a reachable database.' -ForegroundColor Yellow
+    }
 } elseif ($pg.Status -ne 'Running') {
-    Write-Host 'Postgres: NOT running — start it from Services (needs admin).' -ForegroundColor Yellow
+    Write-Host "Postgres: service $($pg.Name) is NOT running — start it from Services (needs admin)." -ForegroundColor Yellow
 } else {
-    Write-Host 'Postgres: running' -ForegroundColor Green
+    Write-Host "Postgres: running ($($pg.Name))" -ForegroundColor Green
 }
 
-# 2. Redis
-if (Test-Port 6379) {
-    Write-Host 'Redis: already running (6379)' -ForegroundColor Green
-} elseif (Test-Path $Redis) {
-    Start-Process -FilePath $Redis -ArgumentList '--port', '6379' -WindowStyle Minimized
-    Write-Host 'Redis: started (6379)' -ForegroundColor Green
-} else {
-    Write-Host "Redis: not found at $Redis" -ForegroundColor Yellow
-}
-
-# 3. Ollama (local LLM)
-if (Test-Port 11434) {
-    Write-Host 'Ollama: already running (11434)' -ForegroundColor Green
-} elseif (Test-Path $Ollama) {
-    Start-Process -FilePath $Ollama -ArgumentList 'serve' -WindowStyle Minimized
-    Write-Host 'Ollama: started (11434)' -ForegroundColor Green
-} else {
-    Write-Host 'Ollama: not found — LLM extraction will be unavailable.' -ForegroundColor Yellow
-}
-
-Start-Sleep -Seconds 2
-
-# 4. FastAPI backend
-if (Test-Port 8000) {
+# 2. FastAPI backend (runs the discovery scheduler in-process)
+if (-not (Test-Path $Py)) {
+    Write-Host "Backend venv not found at $Py — create it: cd backend; python -m venv .venv; .venv\Scripts\pip install -r requirements.txt" -ForegroundColor Red
+} elseif (Test-Port 8000) {
     Write-Host 'API: already running (8000)' -ForegroundColor Green
 } else {
     Start-InWindow 'IAS API' $Backend "& '$Py' -m uvicorn app.main:app --host 127.0.0.1 --port 8000"
     Write-Host 'API: starting (8000)' -ForegroundColor Green
 }
 
-# 5. Celery worker (Windows requires --pool=solo)
-Start-InWindow 'IAS Worker' $Backend "& '$Py' -m celery -A app.workers.celery_app.celery worker --loglevel=info --pool=solo"
-Write-Host 'Celery worker: starting' -ForegroundColor Green
-
-# 6. Celery beat (10-min discovery cadence)
-Start-InWindow 'IAS Beat' $Backend "& '$Py' -m celery -A app.workers.celery_app.celery beat --loglevel=info"
-Write-Host 'Celery beat: starting' -ForegroundColor Green
-
-# 7. Next.js frontend
+# 3. Next.js frontend
 if (Test-Port 3001) {
     Write-Host 'Frontend: already running (3001)' -ForegroundColor Green
 } else {
@@ -100,5 +79,6 @@ if (Test-Port 3001) {
 Write-Host ''
 Write-Host 'Dashboard:  http://localhost:3001' -ForegroundColor Cyan
 Write-Host 'API docs:   http://localhost:8000/docs' -ForegroundColor Cyan
-Write-Host 'Login:      admin@digitallearning.in / ChangeMe123!' -ForegroundColor Cyan
-Write-Host '(Give the API/frontend ~10s to finish booting.)' -ForegroundColor DarkGray
+Write-Host 'Health:     http://localhost:8000/health' -ForegroundColor Cyan
+Write-Host 'Login:      FIRST_ADMIN_EMAIL / FIRST_ADMIN_PASSWORD from .env (default admin@digitallearning.in / ChangeMe123!)' -ForegroundColor Cyan
+Write-Host '(Give the API/frontend ~10s to finish booting; the first discovery cycle starts right after.)' -ForegroundColor DarkGray

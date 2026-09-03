@@ -25,27 +25,18 @@ jobs:
           --health-interval 10s
           --health-timeout 5s
           --health-retries 5
-      redis:
-        image: redis:7-alpine
-        ports:
-          - 6379:6379
-        options: >-
-          --health-cmd "redis-cli ping"
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
 
     env:
-      # The unit tests below are DB-free, but providing these keeps any
-      # import-time config happy and lets future DB tests use the services.
+      # The unit tests are DB-free, but providing these keeps import-time
+      # config happy and lets future DB tests use the Postgres service.
       DATABASE_URL: postgresql+asyncpg://ias:ias_password@localhost:5432/ias_transfers
       DATABASE_URL_SYNC: postgresql+psycopg2://ias:ias_password@localhost:5432/ias_transfers
-      REDIS_URL: redis://localhost:6379/0
-      CELERY_BROKER_URL: redis://localhost:6379/1
-      CELERY_RESULT_BACKEND: redis://localhost:6379/2
       SECRET_KEY: ci-test-secret-key
-      ENCRYPTION_KEY: ci-placeholder-fernet-key
-      LLM_PROVIDER: ollama
+      # A syntactically valid (throwaway) Fernet key — anything else makes encrypt_secret() raise.
+      ENCRYPTION_KEY: MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=
+      LLM_PROVIDER: openai
+      # Never start the in-process discovery scheduler in CI.
+      ENABLE_INPROCESS_SCHEDULER: "0"
 
     steps:
       - uses: actions/checkout@v4

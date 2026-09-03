@@ -1,0 +1,904 @@
+{
+  "name": "IAS Transfer Intelligence API",
+  "version": "1.0",
+  "base_url": "https://abhishek-elets-ias-transfer-intelligence.hf.space",
+  "api_prefix": "/api/v1",
+  "interactive_docs": "https://abhishek-elets-ias-transfer-intelligence.hf.space/docs",
+  "openapi_spec": "https://abhishek-elets-ias-transfer-intelligence.hf.space/openapi.json",
+  "content_type": "application/json",
+  "timestamps": "ISO-8601 UTC",
+  "refresh": {
+    "mode": "scheduled",
+    "interval_seconds": 86400,
+    "human": "once every 24 hours, plus one run when the backend restarts",
+    "recommended_cache_seconds": 900,
+    "note": "Data changes at most once a day. Cache responses; polling faster gains nothing."
+  },
+  "auth": {
+    "type": "bearer_jwt",
+    "header": "Authorization: Bearer {access_token}",
+    "expires_in_seconds": 86400,
+    "login": {
+      "method": "POST",
+      "path": "/api/v1/auth/login",
+      "public": true,
+      "request": {
+        "email": "string",
+        "password": "string"
+      },
+      "response": {
+        "access_token": "string",
+        "token_type": "bearer"
+      },
+      "errors": {
+        "401": "Incorrect email or password",
+        "403": "User is disabled"
+      }
+    },
+    "verify": {
+      "method": "GET",
+      "path": "/api/v1/auth/me",
+      "response": {
+        "id": "int",
+        "email": "string",
+        "full_name": "string|null",
+        "role": "admin|viewer"
+      }
+    },
+    "rules": [
+      "Cache the token for 23 hours, then re-login.",
+      "On any 401, discard the token, log in again, retry the call once.",
+      "Call the API from the portal server, not the browser, so credentials never reach the client.",
+      "If you must call from the browser, add the portal origin to the backend secret BACKEND_CORS_ORIGINS first."
+    ]
+  },
+  "endpoints": {
+    "feed_full": {
+      "method": "GET",
+      "path": "/api/v1/ias.json",
+      "auth": "none (public unless FEED_TOKEN is set)",
+      "purpose": "Drop-in replacement for a CXO Movement Tracker sector feed. Every record, newest first.",
+      "format": "CXO Movement Tracker v1",
+      "query": {
+        "limit": {
+          "type": "integer",
+          "min": 1,
+          "max": 10000,
+          "default": 2000
+        },
+        "days": {
+          "type": "integer",
+          "min": 1,
+          "max": 3650,
+          "note": "only records added in the last N days"
+        },
+        "token": {
+          "type": "string",
+          "note": "only when FEED_TOKEN is configured"
+        }
+      },
+      "response": {
+        "api_version": "1",
+        "source": "IAS Transfer Intelligence",
+        "sector": "Government",
+        "updated": "datetime",
+        "count": "integer",
+        "records": "FeedRecord[]"
+      },
+      "headers": {
+        "Cache-Control": "public, max-age=900, stale-while-revalidate=3600",
+        "Access-Control-Allow-Origin": "*"
+      },
+      "example_request": "https://abhishek-elets-ias-transfer-intelligence.hf.space/api/v1/ias.json?days=30"
+    },
+    "feed_latest": {
+      "method": "GET",
+      "path": "/api/v1/ias_latest.json",
+      "auth": "none (public unless FEED_TOKEN is set)",
+      "purpose": "The 50 newest records, for a homepage block.",
+      "query": {
+        "limit": {
+          "type": "integer",
+          "min": 1,
+          "max": 500,
+          "default": 50
+        }
+      },
+      "response": "same envelope as feed_full",
+      "example_request": "https://abhishek-elets-ias-transfer-intelligence.hf.space/api/v1/ias_latest.json"
+    },
+    "feed_index": {
+      "method": "GET",
+      "path": "/api/v1/index.json",
+      "auth": "none (public unless FEED_TOKEN is set)",
+      "purpose": "Manifest: record counts, refresh interval and the endpoint list.",
+      "response": {
+        "api_version": "1",
+        "source": "IAS Transfer Intelligence",
+        "updated": "datetime",
+        "counts": {
+          "ias": "integer",
+          "ias_latest": "integer",
+          "articles": "integer"
+        },
+        "refresh_interval_seconds": "integer",
+        "endpoints": [
+          "ias.json",
+          "ias_latest.json",
+          "index.json"
+        ]
+      },
+      "example_request": "https://abhishek-elets-ias-transfer-intelligence.hf.space/api/v1/index.json"
+    },
+    "news_list": {
+      "method": "GET",
+      "path": "/api/v1/news",
+      "auth": "token",
+      "purpose": "Latest IAS transfer news, newest first. Use for a live news block.",
+      "order": "published_at DESC, nulls last, then created_at DESC",
+      "query": {
+        "page": {
+          "type": "integer",
+          "min": 1,
+          "default": 1
+        },
+        "page_size": {
+          "type": "integer",
+          "min": 1,
+          "max": 200,
+          "default": 25
+        },
+        "q": {
+          "type": "string",
+          "max_length": 200,
+          "matches": "headline or source name, case-insensitive"
+        },
+        "days": {
+          "type": "integer",
+          "min": 1,
+          "max": 365,
+          "note": "only the last N days"
+        },
+        "exclude_irrelevant": {
+          "type": "boolean",
+          "default": false,
+          "note": "hides non-transfer news; use true on public pages"
+        },
+        "with_transfers": {
+          "type": "boolean",
+          "default": false,
+          "note": "only articles that produced a record"
+        },
+        "status": {
+          "type": "enum",
+          "ref": "enums.article_status"
+        },
+        "source": {
+          "type": "string",
+          "max_length": 100,
+          "note": "partial publisher name"
+        },
+        "language": {
+          "type": "string",
+          "max_length": 8,
+          "values": [
+            "en",
+            "hi"
+          ]
+        }
+      },
+      "response": {
+        "items": "Article[]",
+        "total": "integer",
+        "page": "integer",
+        "page_size": "integer"
+      },
+      "example_request": "/api/v1/news?page_size=8&days=7&exclude_irrelevant=true",
+      "example_response": {
+        "items": [
+          {
+            "id": 101,
+            "url": "https://news.google.com/rss/articles/CBMi...",
+            "resolved_url": "https://apacnewsnetwork.com/2026/09/ias-rajeev-singh-thakur-appointed-manipur-chief-secretary/",
+            "title": "IAS Rajeev Singh Thakur Appointed Manipur Chief Secretary",
+            "source_name": "APAC Media",
+            "language": "en",
+            "published_at": "2026-09-02T06:27:26+00:00",
+            "status": "parsed",
+            "relevance_score": 0.6,
+            "created_at": "2026-09-02T08:18:11+00:00",
+            "transfers_count": 1
+          }
+        ],
+        "total": 174,
+        "page": 1,
+        "page_size": 8
+      }
+    },
+    "transfers_list": {
+      "method": "GET",
+      "path": "/api/v1/transfers",
+      "auth": "token",
+      "purpose": "Structured transfer records. Use for tables, search and landing pages.",
+      "query": {
+        "page": {
+          "type": "integer",
+          "min": 1,
+          "default": 1
+        },
+        "page_size": {
+          "type": "integer",
+          "min": 1,
+          "max": 200,
+          "default": 25
+        },
+        "q": {
+          "type": "string",
+          "matches": "officer name, posting or destination district"
+        },
+        "state": {
+          "type": "string",
+          "note": "partial, case-insensitive"
+        },
+        "district": {
+          "type": "string",
+          "note": "matches previous OR new district"
+        },
+        "officer": {
+          "type": "string"
+        },
+        "batch": {
+          "type": "string",
+          "note": "IAS batch year, e.g. 2009"
+        },
+        "cadre": {
+          "type": "string"
+        },
+        "source": {
+          "type": "string",
+          "note": "publisher name"
+        },
+        "status": {
+          "type": "enum",
+          "ref": "enums.transfer_status"
+        },
+        "sort": {
+          "type": "enum",
+          "values": [
+            "news_date",
+            "created_at",
+            "transfer_date",
+            "officer"
+          ],
+          "default": "news_date"
+        },
+        "order": {
+          "type": "enum",
+          "values": [
+            "asc",
+            "desc"
+          ],
+          "default": "desc"
+        }
+      },
+      "response": {
+        "items": "Transfer[]",
+        "total": "integer",
+        "page": "integer",
+        "page_size": "integer"
+      },
+      "example_request": "/api/v1/transfers?page_size=20&sort=news_date&order=desc",
+      "example_response": {
+        "items": [
+          {
+            "id": 3,
+            "officer_name": "Rajeev Singh Thakur",
+            "ias_batch": "1994",
+            "cadre": "Manipur",
+            "state": "Manipur",
+            "current_designation": "Chief Secretary",
+            "previous_district": null,
+            "previous_posting": null,
+            "new_district": null,
+            "new_posting": "Chief Secretary, Manipur",
+            "transfer_date": null,
+            "effective_date": null,
+            "news_date": "2026-09-02T06:27:26+00:00",
+            "reason": null,
+            "notification_number": null,
+            "gov_order_link": null,
+            "source_name": "APAC Media",
+            "source_url": "https://apacnewsnetwork.com/2026/09/ias-rajeev-singh-thakur-appointed-manipur-chief-secretary/",
+            "corroborating_sources": [
+              "https://apacnewsnetwork.com/2026/09/ias-rajeev-singh-thakur-appointed-manipur-chief-secretary/"
+            ],
+            "discrepancies": [],
+            "status": "pending",
+            "created_at": "2026-09-02T08:42:49+00:00",
+            "updated_at": "2026-09-02T08:42:49+00:00"
+          }
+        ],
+        "total": 412,
+        "page": 1,
+        "page_size": 20
+      }
+    },
+    "transfer_by_id": {
+      "method": "GET",
+      "path": "/api/v1/transfers/{transfer_id}",
+      "auth": "token",
+      "path_params": {
+        "transfer_id": {
+          "type": "integer"
+        }
+      },
+      "response": "Transfer",
+      "errors": {
+        "404": "Transfer not found"
+      }
+    },
+    "transfers_by_officer": {
+      "method": "GET",
+      "path": "/api/v1/transfers/officer/{name}",
+      "auth": "token",
+      "purpose": "Career timeline for one officer, newest first.",
+      "path_params": {
+        "name": {
+          "type": "string",
+          "note": "URL-encode the name"
+        }
+      },
+      "response": "Transfer[]",
+      "response_shape": "plain array, no pagination wrapper",
+      "warning": "Backend uses a substring match, so 'Amit Kumar' also returns 'Amit Kumari'. Filter for an exact case-insensitive match before rendering an officer page."
+    },
+    "stats": {
+      "method": "GET",
+      "path": "/api/v1/stats",
+      "auth": "token",
+      "purpose": "Counters for a dashboard summary strip. Day boundaries follow Indian Standard Time.",
+      "response": {
+        "total_transfers": "integer",
+        "today": "integer",
+        "this_week": "integer",
+        "this_month": "integer",
+        "pending": "integer",
+        "verified": "integer",
+        "exported": "integer",
+        "by_state": "[{ state: string, count: integer }]",
+        "news_total": "integer",
+        "news_today": "integer",
+        "news_week": "integer",
+        "news_pending": "integer",
+        "last_cycle_at": "datetime|null"
+      },
+      "example_response": {
+        "total_transfers": 412,
+        "today": 7,
+        "this_week": 41,
+        "this_month": 118,
+        "pending": 96,
+        "verified": 210,
+        "exported": 106,
+        "by_state": [
+          {
+            "state": "Uttar Pradesh",
+            "count": 63
+          },
+          {
+            "state": "Bihar",
+            "count": 44
+          }
+        ],
+        "news_total": 1840,
+        "news_today": 36,
+        "news_week": 185,
+        "news_pending": 0,
+        "last_cycle_at": "2026-09-02T08:58:04+00:00"
+      }
+    },
+    "analytics": {
+      "method": "GET",
+      "path": "/api/v1/stats/analytics",
+      "auth": "token",
+      "purpose": "Series for charts.",
+      "response": {
+        "by_state": "[{ state: string, count: integer }]",
+        "by_cadre": "[{ cadre: string, count: integer }]",
+        "by_district": "[{ district: string, count: integer }]",
+        "by_month": "[{ month: 'YYYY-MM', count: integer }]"
+      }
+    },
+    "agent_status": {
+      "method": "GET",
+      "path": "/api/v1/agents/status",
+      "auth": "token",
+      "purpose": "Crawl state for an 'updated' line on the dashboard.",
+      "response": {
+        "last_run": "datetime|null",
+        "next_run": "datetime|null",
+        "running": "boolean",
+        "started_at": "datetime|null",
+        "finished_at": "datetime|null",
+        "trigger": "string|null",
+        "last_error": "string|null",
+        "interval_seconds": "integer",
+        "summary": "{ articles, transfers, new, exported, failed, remaining }|null"
+      }
+    },
+    "run_crawl": {
+      "method": "POST",
+      "path": "/api/v1/agents/run",
+      "auth": "token (admin role only)",
+      "purpose": "Manual crawl button on an admin screen.",
+      "request": null,
+      "response": {
+        "started": "boolean",
+        "already_running": "boolean"
+      },
+      "errors": {
+        "403": "Admin role required"
+      },
+      "warning": "A cycle takes up to twenty minutes and costs LLM credits. Never call on a page load. The scheduler already runs it every 24 hours."
+    },
+    "run_crawl_cron": {
+      "method": "POST",
+      "path": "/api/v1/agents/run-cycle",
+      "auth": "header x-cron-token: {CRON_TOKEN}",
+      "purpose": "Trigger a crawl from an external scheduler without logging in.",
+      "response": {
+        "started": "boolean",
+        "already_running": "boolean"
+      },
+      "errors": {
+        "401": "Invalid or missing cron token"
+      }
+    },
+    "health": {
+      "method": "GET",
+      "path": "/health",
+      "auth": "public",
+      "note": "No /api/v1 prefix. Use for uptime monitoring and deployment checks.",
+      "response": {
+        "status": "ok|degraded",
+        "version": "string",
+        "database": "{ ok: boolean, error: string|null }",
+        "scheduler": "{ enabled: boolean, interval_seconds: integer, next_run: datetime|null }",
+        "llm": "{ provider: string, model: string, configured: boolean }",
+        "pipeline": "{ running: boolean, started_at, finished_at, last_error, last_cycle }"
+      }
+    },
+    "assistant": {
+      "method": "POST",
+      "path": "/api/v1/chat/ask",
+      "auth": "token",
+      "purpose": "Natural-language question answered from the transfer records, with a live web fallback.",
+      "request": {
+        "question": "string"
+      },
+      "response": {
+        "answer": "string",
+        "sources": "ChatSource[]",
+        "web_sources": "[{ title, url, source, published }] (optional)",
+        "from_web": "boolean (optional)"
+      },
+      "note": "Can take up to 60 seconds. Use a generous timeout."
+    },
+    "sheets_status": {
+      "method": "GET",
+      "path": "/api/v1/sync/status",
+      "auth": "token",
+      "purpose": "Google Sheets export state for an admin screen.",
+      "response": {
+        "last_sync": "datetime|null",
+        "last_status": "string|null",
+        "exported_rows": "integer",
+        "failed_uploads": "integer",
+        "sheet": "{ connected: boolean, total_rows: integer, error: string|null }"
+      }
+    }
+  },
+  "models": {
+    "Article": {
+      "id": {
+        "type": "integer",
+        "nullable": false
+      },
+      "url": {
+        "type": "string",
+        "nullable": false,
+        "note": "may be a Google News redirect"
+      },
+      "resolved_url": {
+        "type": "string",
+        "nullable": true,
+        "note": "publisher URL; prefer this for links"
+      },
+      "title": {
+        "type": "string",
+        "nullable": true
+      },
+      "source_name": {
+        "type": "string",
+        "nullable": true
+      },
+      "language": {
+        "type": "string",
+        "nullable": true,
+        "values": [
+          "en",
+          "hi"
+        ]
+      },
+      "published_at": {
+        "type": "datetime",
+        "nullable": true
+      },
+      "status": {
+        "type": "enum",
+        "ref": "enums.article_status",
+        "nullable": false
+      },
+      "relevance_score": {
+        "type": "number",
+        "nullable": true,
+        "range": "0.0-1.0"
+      },
+      "created_at": {
+        "type": "datetime",
+        "nullable": false,
+        "note": "when the crawler found it"
+      },
+      "transfers_count": {
+        "type": "integer",
+        "nullable": false,
+        "note": "records extracted from this article"
+      }
+    },
+    "Transfer": {
+      "id": {
+        "type": "integer",
+        "nullable": false
+      },
+      "officer_name": {
+        "type": "string",
+        "nullable": false
+      },
+      "ias_batch": {
+        "type": "string",
+        "nullable": true
+      },
+      "cadre": {
+        "type": "string",
+        "nullable": true
+      },
+      "state": {
+        "type": "string",
+        "nullable": true,
+        "note": "validated against Indian states and UTs"
+      },
+      "current_designation": {
+        "type": "string",
+        "nullable": true
+      },
+      "previous_district": {
+        "type": "string",
+        "nullable": true
+      },
+      "previous_posting": {
+        "type": "string",
+        "nullable": true
+      },
+      "new_district": {
+        "type": "string",
+        "nullable": true
+      },
+      "new_posting": {
+        "type": "string",
+        "nullable": true
+      },
+      "transfer_date": {
+        "type": "string",
+        "nullable": true,
+        "warning": "FREE TEXT copied from the article, not a date. Do not parse."
+      },
+      "effective_date": {
+        "type": "string",
+        "nullable": true,
+        "warning": "free text, same as above"
+      },
+      "news_date": {
+        "type": "datetime",
+        "nullable": true,
+        "note": "publication date of the source article; sortable and parseable"
+      },
+      "reason": {
+        "type": "string",
+        "nullable": true
+      },
+      "notification_number": {
+        "type": "string",
+        "nullable": true
+      },
+      "gov_order_link": {
+        "type": "string",
+        "nullable": true
+      },
+      "source_name": {
+        "type": "string",
+        "nullable": true
+      },
+      "source_url": {
+        "type": "string",
+        "nullable": true
+      },
+      "corroborating_sources": {
+        "type": "string[]",
+        "nullable": true,
+        "note": "every article reporting this transfer"
+      },
+      "discrepancies": {
+        "type": "object[]",
+        "nullable": true,
+        "note": "fields where sources disagree"
+      },
+      "status": {
+        "type": "enum",
+        "ref": "enums.transfer_status",
+        "nullable": false
+      },
+      "created_at": {
+        "type": "datetime",
+        "nullable": false
+      },
+      "updated_at": {
+        "type": "datetime",
+        "nullable": false
+      }
+    },
+    "ChatSource": {
+      "id": "integer",
+      "officer_name": "string",
+      "state": "string|null",
+      "previous_district": "string|null",
+      "previous_posting": "string|null",
+      "new_district": "string|null",
+      "new_posting": "string|null",
+      "transfer_date": "string|null",
+      "source_name": "string|null",
+      "source_url": "string|null"
+    },
+    "FeedRecord": {
+      "_note": "First twelve keys are the CXO Movement Tracker contract, in order. The rest are IAS-specific additions.",
+      "date": {
+        "type": "string",
+        "format": "YYYY-MM-DD",
+        "source": "parseable transfer_date, else effective_date, else article publication date, else record creation date"
+      },
+      "person": {
+        "type": "string",
+        "source": "officer_name"
+      },
+      "movement": {
+        "type": "enum",
+        "values": [
+          "Transfer",
+          "Appointment",
+          "Promotion",
+          "Retirement",
+          "Resignation",
+          "Re-appointment"
+        ],
+        "note": "Transfer is added to the tracker vocabulary"
+      },
+      "role": {
+        "type": "string",
+        "source": "new_posting, else current_designation, else 'Collector, {district}'"
+      },
+      "role_group": {
+        "type": "enum",
+        "values": [
+          "Chief Secretary",
+          "District Magistrate / Collector",
+          "Secretary",
+          "Commissioner",
+          "Sub-Divisional Magistrate",
+          "Managing Director / CEO",
+          "Director",
+          "Chairman",
+          "Other"
+        ],
+        "note": "English and Hindi titles both map"
+      },
+      "company": {
+        "type": "string",
+        "source": "employing government, e.g. 'Government of Bihar'"
+      },
+      "moved_from": {
+        "type": "string",
+        "source": "previous_district, else previous_posting; empty when unknown"
+      },
+      "moved_from_source": {
+        "type": "string",
+        "values": [
+          "article",
+          ""
+        ]
+      },
+      "sector": {
+        "type": "string",
+        "constant": "Government"
+      },
+      "region": {
+        "type": "string",
+        "constant": "India"
+      },
+      "headline": {
+        "type": "string",
+        "note": "source article headline; a reshuffle article gives the same headline to each of its records"
+      },
+      "source_count": {
+        "type": "integer",
+        "min": 1,
+        "source": "number of articles reporting this transfer"
+      },
+      "id": {
+        "type": "integer",
+        "extra": true
+      },
+      "state": {
+        "type": "string",
+        "extra": true
+      },
+      "cadre": {
+        "type": "string",
+        "extra": true
+      },
+      "batch": {
+        "type": "string",
+        "extra": true
+      },
+      "district": {
+        "type": "string",
+        "extra": true
+      },
+      "moved_from_district": {
+        "type": "string",
+        "extra": true
+      },
+      "order_number": {
+        "type": "string",
+        "extra": true
+      },
+      "order_link": {
+        "type": "string",
+        "extra": true
+      },
+      "source": {
+        "type": "string",
+        "extra": true
+      },
+      "source_url": {
+        "type": "string",
+        "extra": true
+      },
+      "status": {
+        "type": "enum",
+        "ref": "enums.transfer_status",
+        "extra": true
+      },
+      "updated": {
+        "type": "datetime",
+        "extra": true
+      }
+    }
+  },
+  "enums": {
+    "transfer_status": {
+      "pending": "extracted from one source, not yet corroborated",
+      "verified": "confirmed by a second source or high confidence",
+      "conflicted": "sources disagree, see discrepancies",
+      "exported": "written to the Google Sheet",
+      "export_failed": "sheet write failed, will retry"
+    },
+    "article_status": {
+      "discovered": "queued, not yet fetched",
+      "extracted": "article text pulled",
+      "parsed": "records extracted",
+      "irrelevant": "judged not to be IAS transfer news",
+      "failed": "fetch or read errored, will be retried"
+    },
+    "user_role": {
+      "admin": "full access",
+      "viewer": "read only"
+    }
+  },
+  "display_rules": [
+    {
+      "field": "article link",
+      "rule": "resolved_url || url",
+      "why": "a bare url is often a Google News redirect that does not open cleanly"
+    },
+    {
+      "field": "article timestamp",
+      "rule": "published_at || created_at",
+      "why": "some feeds omit a publication date"
+    },
+    {
+      "field": "transfer date",
+      "rule": "parseable transfer_date, else news_date, else raw transfer_date string, else em dash",
+      "why": "transfer_date is free text and often unparseable"
+    },
+    {
+      "field": "from",
+      "rule": "previous_district || previous_posting || 'no info'"
+    },
+    {
+      "field": "to",
+      "rule": "new_district || new_posting || 'no info'"
+    },
+    {
+      "field": "public listing filter",
+      "rule": "status in [verified, exported]",
+      "why": "pending records are single-source and unconfirmed; conflicted records have contradictions"
+    }
+  ],
+  "recommended_calls": {
+    "portal_feed_drop_in": "https://abhishek-elets-ias-transfer-intelligence.hf.space/api/v1/ias.json",
+    "portal_homepage_block": "https://abhishek-elets-ias-transfer-intelligence.hf.space/api/v1/ias_latest.json",
+    "portal_feed_manifest": "https://abhishek-elets-ias-transfer-intelligence.hf.space/api/v1/index.json",
+    "dashboard_news_block": "/api/v1/news?page_size=8&days=7&exclude_irrelevant=true",
+    "dashboard_counters": "/api/v1/stats",
+    "dashboard_updated_line": "/api/v1/agents/status",
+    "recent_transfers_table": "/api/v1/transfers?page_size=20&sort=news_date&order=desc",
+    "verified_only_table": "/api/v1/transfers?page_size=20&sort=news_date&order=desc&status=verified",
+    "state_landing_page": "/api/v1/transfers?state=Bihar&page_size=50",
+    "district_landing_page": "/api/v1/transfers?district=Patna&page_size=50",
+    "officer_timeline": "/api/v1/transfers/officer/{urlencoded_name}",
+    "search": "/api/v1/transfers?q={query}&page_size=25",
+    "charts": "/api/v1/stats/analytics"
+  },
+  "errors": {
+    "shape": {
+      "detail": "string"
+    },
+    "exception": "HTTP 422 returns detail as an ARRAY of validation objects, not a string. Guard before rendering.",
+    "codes": {
+      "401": {
+        "means": "missing, expired or wrong token",
+        "action": "log in again and retry once"
+      },
+      "403": {
+        "means": "endpoint requires the admin role",
+        "action": "use an admin account or drop the call"
+      },
+      "404": {
+        "means": "no such record",
+        "action": "show an empty state"
+      },
+      "422": {
+        "means": "a parameter failed validation",
+        "action": "check types and ranges"
+      },
+      "500": {
+        "means": "server error",
+        "action": "retry after a pause, check /health"
+      }
+    }
+  },
+  "integration_notes": [
+    "Simplest path for the Elets portal: read /api/v1/ias.json. It needs no token, sets permissive CORS and cache headers, and matches the CXO Movement Tracker record format exactly. Use the authenticated REST endpoints below only when you need filtering, pagination or officer pages.",
+    "Call the API from the portal server and cache responses for about 15 minutes.",
+    "The crawl runs once every 24 hours, so there is no value in polling more often.",
+    "The first request after a quiet period can take a few seconds while the container wakes. Use a 20 second timeout and serve stale cache on failure.",
+    "Most Transfer fields are nullable because extraction is best-effort. Template every field with a fallback.",
+    "page_size above 200 returns 422. Page through results using total.",
+    "Records improve as more sources report the same transfer. Key any local cache on id and refresh, rather than copying records permanently into portal tables.",
+    "Use a viewer-role account for the portal rather than the admin login."
+  ],
+  "compatible_with": {
+    "format": "CXO Movement Tracker",
+    "reference": "https://cxo-movement-tracker.vercel.app/api/v1/bfsi.json",
+    "note": "/api/v1/ias.json returns the same envelope and the same twelve record keys in the same order, so a consumer of the tracker feeds can read it by changing only the URL. IAS-specific keys are appended after the twelve and can be ignored."
+  }
+}

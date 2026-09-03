@@ -1,204 +1,212 @@
 # Deployment Guide — IAS Transfer Intelligence Dashboard
 
-Production deployment of the full stack (Postgres, Redis, Ollama, FastAPI API,
-Celery worker + beat, Flower, Next.js frontend) using Docker Compose behind an
-nginx reverse proxy with TLS.
+Production topology:
+
+| Component | Host | Details |
+|-----------|------|---------|
+| Backend (FastAPI + in-process scheduler) | Hugging Face Docker Space `abhishek-elets/ias-transfer-intelligence` | Built from `backend/Dockerfile`, port 7860. URL `https://abhishek-elets-ias-transfer-intelligence.hf.space` |
+| Frontend (Next.js 14) | Vercel project `frontend` | Deployed with the Vercel CLI from `./frontend` |
+| Database (PostgreSQL) | Supabase | Reached through the Session Pooler |
+
+There is no separate worker, broker, or cron host: the discovery cycle runs on
+a background thread inside the API container.
 
 ---
 
-## 1. Server prerequisites
+## 1. Generate secrets
 
-- A Linux host (Ubuntu 22.04+ recommended) with **Docker Engine** and the
-  **Docker Compose** plugin.
-- Minimum **4 vCPU / 8 GB RAM / 40 GB disk**. The local LLM (`llama3.2:3b`) and
-  OCR are CPU-bound; allocate more cores for higher article throughput. A GPU
-  host materially speeds up Ollama if available.
-- Open inbound ports **80** and **443** only (everything else stays internal).
-- A domain name with DNS A records for the API and dashboard (e.g.
-  `api.example.com` and `app.example.com`).
-
----
-
-## 2. Generate secrets
-
-Never ship the default `SECRET_KEY`/`ENCRYPTION_KEY`. On the server:
+Never ship the default `SECRET_KEY` / `ENCRYPTION_KEY`:
 
 ```bash
 python3 -c "import secrets; print('SECRET_KEY=' + secrets.token_urlsafe(48))"
 python3 -c "from cryptography.fernet import Fernet; print('ENCRYPTION_KEY=' + Fernet.generate_key().decode())"
+python3 -c "import secrets; print('CRON_TOKEN=' + secrets.token_urlsafe(32))"
 ```
 
-Paste both into `.env`. Also set strong values for `FIRST_ADMIN_PASSWORD` and
-the Postgres password. Set `ENVIRONMENT=production` and restrict
-`BACKEND_CORS_ORIGINS` to your real dashboard origin(s).
-
-> **Important:** `ENCRYPTION_KEY` encrypts API keys stored at rest in the DB.
-> If you rotate it, previously stored encrypted values can no longer be
-> decrypted — re-enter them after rotation.
+> `ENCRYPTION_KEY` encrypts the runtime OpenAI key stored by the Settings page.
+> If you rotate it, re-enter that key afterwards.
 
 ---
 
-## 3. Configure a real Postgres
+## 2. Supabase (database)
 
-You can keep the bundled `db` service, but for production prefer a managed or
-dedicated Postgres 16 instance with its own backups and monitoring. Point the
-backend at it (note the two URLs — async + sync):
+1. Create a Supabase project and note the project ref and database password.
+2. In **Project Settings → Database → Connection string**, pick the
+   **Session Pooler** entry. It looks like
+   `aws-1-ap-northeast-2.pooler.supabase.com:5432` with user
+   `postgres.<project-ref>`.
+3. Build both URLs (the API uses asyncpg, the pipeline uses psycopg2):
 
 ```env
-DATABASE_URL=postgresql+asyncpg://USER:PASSWORD@db-host:5432/ias_transfers
-DATABASE_URL_SYNC=postgresql+psycopg2://USER:PASSWORD@db-host:5432/ias_transfers
+DATABASE_URL=postgresql+asyncpg://postgres.<project-ref>:<password>@aws-1-ap-northeast-2.pooler.supabase.com:5432/postgres
+DATABASE_URL_SYNC=postgresql+psycopg2://postgres.<project-ref>:<password>@aws-1-ap-northeast-2.pooler.supabase.com:5432/postgres
+DB_SSL=true
 ```
 
-Bootstrap the schema once (the API does this automatically when `RUN_DB_INIT=1`,
-or run it manually):
+**Do not** use the direct host `db.<project-ref>.supabase.co`: it resolves to
+IPv6 only and is unreachable from Hugging Face Spaces (the Space ends in
+`RUNTIME_ERROR` / `/health` reports `degraded`).
+
+The schema is created and upgraded automatically at container boot
+(`python -m scripts.init_db` — `create_all` plus idempotent `ALTER TABLE ...
+ADD COLUMN` for new columns). No manual migration step is needed.
+
+### Optional: external cron with pg_cron
+
+The in-process scheduler already runs the cycle hourly. If you also want an
+external trigger (or you set `ENABLE_INPROCESS_SCHEDULER=false`), enable the
+`pg_cron` and `pg_net` extensions in Supabase and schedule:
+
+```sql
+select cron.schedule('ias-discovery', '0 * * * *', $$
+  select net.http_post(
+    url     := 'https://abhishek-elets-ias-transfer-intelligence.hf.space/api/v1/agents/run-cycle',
+    headers := '{"x-cron-token": "<CRON_TOKEN>"}'::jsonb
+  );
+$$);
+```
+
+Overlapping triggers are safe — only one cycle runs at a time.
+
+---
+
+## 3. Backend on Hugging Face Spaces
+
+The Space is a **Docker** Space whose repo is the contents of `./backend`
+(`backend/README.md` carries the YAML front matter HF reads: `sdk: docker`,
+`app_port: 7860`).
+
+### Secrets and variables (Space → Settings → Variables and secrets)
+
+Secrets:
+
+| Name | Value |
+|------|-------|
+| `DATABASE_URL` | asyncpg pooler URL from step 2 |
+| `DATABASE_URL_SYNC` | psycopg2 pooler URL from step 2 |
+| `DB_SSL` | `true` |
+| `OPENAI_API_KEY` | OpenAI key |
+| `SECRET_KEY` | from step 1 |
+| `ENCRYPTION_KEY` | from step 1 |
+| `CRON_TOKEN` | from step 1 |
+| `BACKEND_CORS_ORIGINS` | `https://<your-vercel-app>.vercel.app` (comma-separate several) |
+| `FIRST_ADMIN_EMAIL` / `FIRST_ADMIN_PASSWORD` | dashboard login |
+| `GOOGLE_CREDENTIALS_JSON` | the full service-account JSON, single line. Space disks are ephemeral, so a file uploaded via the Settings page is lost on restart; this secret is written to `GOOGLE_CREDENTIALS_FILE` at every boot |
+
+Variables (non-secret):
+
+| Name | Value |
+|------|-------|
+| `ENVIRONMENT` | `production` |
+| `GOOGLE_SHEET_ID` | target spreadsheet id |
+| `GOOGLE_WORKSHEET_NAME` | default `Transfers` |
+| `DISCOVERY_INTERVAL_SECONDS` | default `3600` |
+| `LLM_PROVIDER` | `openai` (default) or `anthropic` |
+
+### Deploy / redeploy
+
+The Space builds from its own git repository, whose root is this repo's
+`backend/` directory (the two histories are unrelated, so `git subtree push`
+will not work). Use the helper script, which clones the Space repo, mirrors
+`backend/` into it, commits and pushes:
+
+```powershell
+$env:HF_TOKEN = "<hugging-face token with write access>"
+powershell -ExecutionPolicy Bypass -File .\scripts\deploy_backend.ps1 -Message "fix: ..."
+```
+
+Doing it by hand is the same thing: clone
+`https://huggingface.co/spaces/abhishek-elets/ias-transfer-intelligence`, copy
+the contents of `backend/` over it (excluding `.git`), commit, push to `main`.
+Every push rebuilds the image and restarts the container; secrets are kept.
+Changing a secret in the Space settings also restarts it.
+
+Verify:
 
 ```bash
-docker compose exec api python -m scripts.init_db
+curl https://abhishek-elets-ias-transfer-intelligence.hf.space/health
 ```
 
-If you use an external DB, remove the `db` service and its `depends_on` /
-healthcheck references from `docker-compose.yml`.
+Expect `"status": "ok"`, `"startup": {"db_ok": true, "schema_ok": true,
+"admin_ok": true, "scheduler": "running"}` and a `scheduler.next_run` timestamp.
 
 ---
 
-## 4. Reverse proxy with TLS (nginx)
-
-Terminate TLS at nginx and proxy to the internal containers. Obtain certs with
-Let's Encrypt / certbot. In production, bind the `api`, `flower`, and `frontend`
-container ports to `127.0.0.1` (or drop the `ports:` mappings entirely and put
-them on an internal Docker network) so only nginx is publicly reachable.
-
-```nginx
-# /etc/nginx/sites-available/ias.conf
-
-# --- API (api.example.com) ---------------------------------------------------
-server {
-    listen 443 ssl http2;
-    server_name api.example.com;
-
-    ssl_certificate     /etc/letsencrypt/live/api.example.com/fullchain.pem;
-    ssl_certificate_key /etc/letsencrypt/live/api.example.com/privkey.pem;
-
-    client_max_body_size 10m;   # allow service-account JSON uploads
-
-    location / {
-        proxy_pass         http://127.0.0.1:8000;
-        proxy_set_header   Host $host;
-        proxy_set_header   X-Real-IP $remote_addr;
-        proxy_set_header   X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header   X-Forwarded-Proto $scheme;
-    }
-}
-
-# --- Dashboard (app.example.com) ---------------------------------------------
-server {
-    listen 443 ssl http2;
-    server_name app.example.com;
-
-    ssl_certificate     /etc/letsencrypt/live/app.example.com/fullchain.pem;
-    ssl_certificate_key /etc/letsencrypt/live/app.example.com/privkey.pem;
-
-    location / {
-        proxy_pass         http://127.0.0.1:3000;
-        proxy_set_header   Host $host;
-        proxy_set_header   X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header   X-Forwarded-Proto $scheme;
-    }
-}
-
-# --- HTTP -> HTTPS redirect ---------------------------------------------------
-server {
-    listen 80;
-    server_name api.example.com app.example.com;
-    return 301 https://$host$request_uri;
-}
-```
-
-Set the dashboard's `NEXT_PUBLIC_API_BASE_URL=https://api.example.com` and add
-that origin to `BACKEND_CORS_ORIGINS`.
-
-> **Flower** exposes Celery internals — do not expose it publicly. Reach it via
-> SSH tunnel (`ssh -L 5555:127.0.0.1:5555 host`) or put it behind nginx with
-> HTTP basic auth on an internal-only vhost.
-
----
-
-## 5. Scaling workers
-
-Discovery and per-article processing are CPU-bound (LLM inference + OCR). Scale
-horizontally:
+## 4. Frontend on Vercel
 
 ```bash
-# Run more worker replicas
-docker compose up -d --scale worker=3
+cd frontend
+npm i -g vercel            # once
+vercel login               # once
+vercel link                # once — link to the "frontend" project
+
+# environment: production
+vercel env add NEXT_PUBLIC_API_BASE_URL production
+#   value: https://abhishek-elets-ias-transfer-intelligence.hf.space
+
+vercel deploy --prod
 ```
 
-Tune `--concurrency` per worker to roughly the number of cores available to that
-container. Keep **exactly one** `beat` instance — running multiple beats would
-schedule duplicate discovery cycles.
+`NEXT_PUBLIC_API_BASE_URL` is baked in at build time, so change it in the
+Vercel project settings and redeploy if the backend URL changes. Add the
+resulting Vercel URL (and any custom domain) to the Space's
+`BACKEND_CORS_ORIGINS`.
 
 ---
 
-## 6. Celery beat cadence
+## 5. Google Sheets
 
-`celery beat` enqueues `app.workers.tasks.run_discovery_cycle` every
-`DISCOVERY_INTERVAL_SECONDS` (default **600 s = 10 minutes**). Lower it for
-fresher data (at higher load and outbound-request volume) or raise it to be
-gentler on sources. Per-run caps: `DISCOVERY_MAX_ARTICLES_PER_RUN` and
-`DISCOVERY_LOOKBACK_HOURS`. You can also trigger a cycle on demand via
-`POST /api/v1/agents/discover` (admin).
+1. Create a service account with the Sheets + Drive APIs enabled, download the
+   JSON key, and share the target sheet with its `client_email` (Editor).
+2. Put the JSON into the `GOOGLE_CREDENTIALS_JSON` secret and set
+   `GOOGLE_SHEET_ID`.
+3. Check `/sync` in the dashboard (`GET /api/v1/sync/status` → `sheet.connected`).
+
+Only `verified` records are exported; `POST /api/v1/sync/retry` re-runs failed
+rows.
 
 ---
 
-## 7. Backups
+## 6. Backups
 
-- **Postgres** (the source of truth): nightly logical dumps and retain offsite.
+- **Supabase Postgres** is the source of truth. Supabase takes daily backups on
+  paid plans; additionally take logical dumps with the pooler URL:
   ```bash
-  docker compose exec -T db pg_dump -U ias ias_transfers | gzip > backup-$(date +%F).sql.gz
+  pg_dump "postgresql://postgres.<project-ref>:<password>@aws-1-ap-northeast-2.pooler.supabase.com:5432/postgres?sslmode=require" \
+    | gzip > backup-$(date +%F).sql.gz
   ```
-- **Secrets volume**: back up the `secrets` volume (Google service-account JSON).
-  Treat it as sensitive — store encrypted.
-- **Redis**: ephemeral broker/result state; no backup needed (jobs re-run).
-- **Google Sheet**: an external, human-readable mirror of verified records — a
-  useful secondary record but not a substitute for DB backups.
-
-Test restores periodically.
-
----
-
-## 8. Health monitoring
-
-- **API**: `GET /health` → `{"status": "ok", "version": ...}` (the API container
-  already has a Docker `HEALTHCHECK`). Point your uptime monitor at it.
-- **Celery**: Flower at `:5555` shows worker liveness, queue depth, and task
-  success/failure rates. Alert on rising failure rate or growing queue backlog.
-- **Logs**: structured logs from each service via `docker compose logs -f api worker beat`.
-  The dashboard also exposes `GET /api/v1/logs` and a Sync status page
-  (`GET /api/v1/sync/status`).
-- **Resources**: watch CPU/RAM on the host — sustained saturation means you need
-  more worker replicas or a longer discovery interval.
+- **Space secrets** (`GOOGLE_CREDENTIALS_JSON`, keys): keep a copy in a password
+  manager — the Space filesystem is ephemeral and nothing on it needs backup.
+- **Google Sheet**: a human-readable mirror of verified records, not a substitute
+  for DB backups.
+- News articles are purged after `NEWS_RETENTION_DAYS` (default 15) by design;
+  transfer records are retained.
 
 ---
 
-## 9. Security hardening checklist
+## 7. Monitoring
 
-- [ ] **Rotate `SECRET_KEY`** (JWT signing) from the default; rotating it
-      invalidates existing tokens (forces re-login).
-- [ ] **Rotate `ENCRYPTION_KEY`** (Fernet) from the default; re-enter stored API
-      keys after rotation since old ciphertext becomes undecryptable.
-- [ ] **Change `FIRST_ADMIN_PASSWORD`** and the Postgres password from defaults.
-- [ ] **Restrict CORS**: set `BACKEND_CORS_ORIGINS` to your exact dashboard
-      origin(s) — never `*` in production.
-- [ ] **TLS everywhere**: serve API and dashboard only over HTTPS; redirect HTTP.
-- [ ] **Do not expose** Postgres (5432), Redis (6379), Ollama (11434), or Flower
-      (5555) publicly — bind to `127.0.0.1` / internal network only.
-- [ ] **Run containers non-root** where possible and keep base images patched
-      (`docker compose pull` + rebuild on a schedule).
-- [ ] **Protect Flower** with basic auth or an SSH tunnel.
-- [ ] **Rate limiting**: add request rate limiting at the nginx layer (e.g.
-      `limit_req_zone`) in front of the API, especially `/api/v1/auth/login`, to
-      blunt brute-force and abuse.
-- [ ] **Secrets at rest**: keep `.env` and the `secrets` volume off version
-      control (already in `.gitignore`) and restrict file permissions.
-- [ ] **Least privilege** for the Google service account — share only the target
-      sheet, not the whole Drive.
+- `GET /health` — `status`, live DB probe, startup diagnostics, scheduler
+  `next_run`. Point an uptime monitor at it.
+- `GET /api/v1/agents/status` (JWT) — `last_run`, `last_error`, `running`,
+  `next_run`; also shown on the dashboard's pipeline card.
+- `GET /api/v1/sync/status` (JWT) — Sheets connectivity and failed exports.
+- Space **Logs** tab — structured JSON logs (`discovery_cycle`,
+  `discovery_cycle_failed`, `database_unreachable`, ...).
+- Free Spaces sleep after inactivity; the scheduler only runs while the
+  container is awake. Keep the Space "always on" (paid) or drive it with the
+  pg_cron trigger above, which also wakes it.
+
+---
+
+## 8. Security checklist
+
+- [ ] Change `FIRST_ADMIN_PASSWORD` (and `FIRST_ADMIN_EMAIL`) from the defaults.
+- [ ] Set a random `SECRET_KEY` (JWT signing). Rotating it logs everyone out.
+- [ ] Set a real Fernet `ENCRYPTION_KEY`; re-enter the runtime OpenAI key after rotation.
+- [ ] Set a random `CRON_TOKEN`; with it empty, `/agents/run-cycle` always returns 401.
+- [ ] Restrict `BACKEND_CORS_ORIGINS` to the exact Vercel/custom-domain origins — never `*`.
+- [ ] Set `ENVIRONMENT=production`.
+- [ ] Keep the Supabase database password and service-account JSON only in Space secrets / a password manager, never in git (`.env`, `*-credentials.json` are git-ignored).
+- [ ] Share the Google Sheet with the service account only (least privilege), not the whole Drive.
+- [ ] Use Supabase's network restrictions if your plan supports them; the Space has no fixed egress IP, so leave the pooler reachable but keep the password strong.
