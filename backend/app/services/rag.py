@@ -42,6 +42,35 @@ SYSTEM_PROMPT = (
 # triggers the live web-search fallback.
 _NO_LOCAL = "NO_LOCAL_ANSWER"
 
+_SCOPE_SYSTEM = (
+    "You are a topic gate for an assistant that ONLY covers Indian IAS (Indian "
+    "Administrative Service) / IPS / IFS civil-service officers — their "
+    "transfers, postings, appointments, reshuffles, promotions, cadres, and "
+    "directly related administrative news. Decide if the user's question is "
+    "within that scope. Reply with EXACTLY one word: YES or NO. "
+    "Examples: 'Who is the new Patna DM?' -> YES. 'Recent IAS transfers in "
+    "Kerala' -> YES. 'What's the weather?' -> NO. 'Who won the cricket match?' "
+    "-> NO. 'Tell me a joke' -> NO. 'Capital of France' -> NO."
+)
+
+_OUT_OF_SCOPE_MSG = (
+    "I can only help with questions about IAS officer transfers, postings, and "
+    "related administrative news. Try asking, for example, “Who is the new Patna "
+    "DM?”, “Recent transfers in Bihar”, or “Summarise the latest reshuffle”."
+)
+
+
+def in_scope(question: str) -> bool:
+    """Cheap LLM gate: is this question about IAS/civil-service officers?"""
+    try:
+        ans = llm.complete_text(
+            _SCOPE_SYSTEM, question, max_tokens=2, timeout=settings.CHAT_TIMEOUT_SECONDS
+        ).strip().upper()
+    except Exception as exc:  # noqa: BLE001 — classifier failure shouldn't 500
+        log.warning("scope_check_failed", error=str(exc))
+        return True  # fail open; the grounded prompts still constrain answers
+    return ans.startswith("Y")
+
 _STOP = {
     "the", "a", "an", "of", "to", "in", "on", "for", "and", "or", "is", "are",
     "was", "were", "who", "what", "which", "where", "when", "how", "show", "me",
@@ -153,15 +182,10 @@ WEB_SYSTEM_PROMPT = (
 )
 
 
-def _chat_model() -> str | None:
-    """Use the small fast local model for chat; let a cloud provider use its own."""
-    return settings.CHAT_MODEL if llm.active_provider() == "ollama" else None
-
-
 def _generate(system: str, user: str) -> str:
+    # model=None -> the configured chat model (OPENAI_MODEL by default).
     return llm.complete_text(
         system, user,
-        model=_chat_model(),
         max_tokens=settings.CHAT_MAX_TOKENS,
         timeout=settings.CHAT_TIMEOUT_SECONDS,
     )
@@ -174,9 +198,17 @@ def web_search(question: str, limit: int = 6) -> list[dict[str, Any]]:
 
     import feedparser
 
+    import httpx
+
     q = urllib.parse.quote(question)
     url = f"https://news.google.com/rss/search?q={q}&hl=en-IN&gl=IN&ceid=IN:en"
-    feed = feedparser.parse(url)
+    # feedparser.parse(url) fetches with NO timeout: a stalled connection would
+    # wedge the enrichment step and, with it, the in-process scheduler.
+    resp = httpx.get(url, timeout=settings.HTTP_TIMEOUT_SECONDS,
+                     headers={"User-Agent": settings.HTTP_USER_AGENT},
+                     follow_redirects=True)
+    resp.raise_for_status()
+    feed = feedparser.parse(resp.content)
     items: list[dict[str, Any]] = []
     for e in feed.entries[:limit]:
         summary = re.sub(r"<[^>]+>", "", e.get("summary", "") or "").strip()
@@ -235,7 +267,14 @@ def answer(question: str, records: list[dict[str, Any]]) -> dict[str, Any]:
     Local-first: if the tracked data doesn't cover the question (or there are no
     records), fall back to a live web search. Generation always degrades
     gracefully to a records list so the user never gets a hard error.
+
+    Off-topic questions (not about IAS / civil-service officers) are refused up
+    front — before any retrieval or web search.
     """
+    if not in_scope(question):
+        return {"answer": _OUT_OF_SCOPE_MSG, "sources": [], "web_sources": [],
+                "from_web": False, "out_of_scope": True}
+
     try:
         hits, best_sem = retrieve(question, records)
     except Exception as exc:  # noqa: BLE001 — embedding/index failure shouldn't 500

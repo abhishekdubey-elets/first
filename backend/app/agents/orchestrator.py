@@ -1,14 +1,16 @@
-"""Pipeline orchestrator — wires the seven agents into one flow.
+"""Pipeline orchestrator — wires the agents into one flow.
 
     Discovery → (per article) Extraction → Information → Dedupe/Validation
               → Sheets export → Notifications
 
-Designed to run inside a Celery task with a sync DB session, but can also be
+Runs synchronously on a worker thread with a sync DB session, and can also be
 driven directly (e.g. from a script or a test) by passing a Session.
 """
 from __future__ import annotations
 
-from sqlalchemy import select
+import time
+
+from sqlalchemy import func, nullslast, select
 
 from app.agents.dedupe import DedupeAgent
 from app.agents.discovery import DiscoveryAgent
@@ -74,32 +76,71 @@ def process_article(db, article: Article, *, provider=None, model=None) -> dict:
     }
 
 
-def run_pending(db, *, limit: int | None = None, provider=None, model=None) -> dict:
-    """Process all DISCOVERED articles. Returns an aggregate summary."""
-    limit = limit or settings.DISCOVERY_MAX_ARTICLES_PER_RUN
-    rows = db.execute(
+def _pending_batch(db, limit: int) -> list[Article]:
+    """Next batch of DISCOVERED articles, LATEST NEWS FIRST.
+
+    Processing newest-first means the dashboard's "latest transfers" reflect
+    today's news even when a backlog exists; older items are drained by later
+    cycles.
+    """
+    return db.execute(
         select(Article)
         .where(Article.status == ArticleStatus.DISCOVERED)
-        .order_by(Article.created_at.asc())
+        .order_by(nullslast(Article.published_at.desc()), Article.created_at.desc())
         .limit(limit)
     ).scalars().all()
 
-    totals = {"articles": 0, "transfers": 0, "new": 0, "exported": 0}
-    for article in rows:
-        try:
-            res = process_article(db, article, provider=provider, model=model)
-            totals["articles"] += 1
-            totals["transfers"] += res.get("transfers", 0)
-            totals["new"] += res.get("new", 0)
-            totals["exported"] += res.get("exported", 0)
-            db.commit()
-        except Exception as exc:  # noqa: BLE001
-            db.rollback()
-            article.status = ArticleStatus.FAILED
-            article.error = str(exc)
-            log_event(db, level=LogLevel.ERROR, agent="orchestrator",
-                      action="process", message=f"Article {article.id} failed: {exc}")
-            db.commit()
+
+def run_pending(
+    db,
+    *,
+    limit: int | None = None,
+    provider=None,
+    model=None,
+    time_budget_seconds: float | None = None,
+) -> dict:
+    """Process DISCOVERED articles in batches until none are left or the time
+    budget is spent. Returns an aggregate summary."""
+    batch_size = limit or settings.DISCOVERY_MAX_ARTICLES_PER_RUN
+    budget = time_budget_seconds or settings.CYCLE_TIME_BUDGET_SECONDS
+    started = time.monotonic()
+
+    totals = {"articles": 0, "transfers": 0, "new": 0, "exported": 0, "failed": 0,
+              "remaining": 0, "budget_exhausted": False}
+    processed_ids: set[int] = set()
+    while True:
+        rows = [a for a in _pending_batch(db, batch_size) if a.id not in processed_ids]
+        if not rows:
+            break
+        for article in rows:
+            if time.monotonic() - started > budget:
+                totals["budget_exhausted"] = True
+                break
+            processed_ids.add(article.id)
+            try:
+                res = process_article(db, article, provider=provider, model=model)
+                totals["articles"] += 1
+                totals["transfers"] += res.get("transfers", 0)
+                totals["new"] += res.get("new", 0)
+                totals["exported"] += res.get("exported", 0)
+                db.commit()
+            except Exception as exc:  # noqa: BLE001
+                db.rollback()
+                article.status = ArticleStatus.FAILED
+                article.error = str(exc)[:2000]
+                totals["failed"] += 1
+                log_event(db, level=LogLevel.ERROR, agent="orchestrator",
+                          action="process", message=f"Article {article.id} failed: {exc}")
+                db.commit()
+        if totals["budget_exhausted"] or len(rows) < batch_size:
+            break
+
+    totals["remaining"] = db.execute(
+        select(func.count()).select_from(Article)
+        .where(Article.status == ArticleStatus.DISCOVERED)
+    ).scalar_one()
+    totals["seconds"] = round(time.monotonic() - started, 1)
     log_event(db, level=LogLevel.SUCCESS, agent="orchestrator", action="run",
               message=f"Pipeline run complete: {totals}", context=totals)
+    db.commit()
     return totals

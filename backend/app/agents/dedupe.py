@@ -90,7 +90,8 @@ class DedupeAgent(BaseAgent):
             notification_number=e.notification_number,
             gov_order_link=e.gov_order_link,
             source_name=article.source_name,
-            source_url=article.url,
+            source_url=getattr(article, "resolved_url", None) or article.url,
+            source_headline=(getattr(article, "title", None) or None),
             confidence_score=e.confidence_score,
             dedup_key=key,
             corroborating_sources=[article.url] if article.url else [],
@@ -103,7 +104,7 @@ class DedupeAgent(BaseAgent):
     def _merge(self, rec: IasTransfer, e: ExtractedTransfer, article) -> None:
         """Validation: corroborate from a new source, fill gaps, flag conflicts."""
         sources = list(rec.corroborating_sources or [])
-        new_source = article.url
+        new_source = getattr(article, "resolved_url", None) or article.url
         is_new_source = new_source and new_source not in sources
 
         discrepancies = list(rec.discrepancies or [])
@@ -125,6 +126,9 @@ class DedupeAgent(BaseAgent):
             # Multiple independent sources → boost confidence toward 1.0.
             boost = min(0.12 * (len(sources) - 1), 0.3)
             rec.confidence_score = round(min(1.0, max(rec.confidence_score, e.confidence_score) + boost), 3)
+
+        if not rec.source_headline and getattr(article, "title", None):
+            rec.source_headline = article.title
 
         rec.corroborating_sources = sources
         rec.discrepancies = discrepancies

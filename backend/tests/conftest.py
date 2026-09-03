@@ -18,8 +18,10 @@ if str(_BACKEND_DIR) not in sys.path:
 
 # Provide harmless defaults so config import is never blocked.
 os.environ.setdefault("SECRET_KEY", "test-secret-key")
-os.environ.setdefault("ENCRYPTION_KEY", "test-encryption-key")
-os.environ.setdefault("LLM_PROVIDER", "ollama")
+# A real (throwaway) Fernet key: anything else makes encrypt_secret() raise.
+os.environ.setdefault("ENCRYPTION_KEY", "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=")
+os.environ.setdefault("LLM_PROVIDER", "openai")
+os.environ.setdefault("ENABLE_INPROCESS_SCHEDULER", "0")
 
 import pytest  # noqa: E402
 

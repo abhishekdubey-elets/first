@@ -27,6 +27,12 @@ class Base(DeclarativeBase):
     """Declarative base for all ORM models."""
 
 
+# Managed Postgres (Supabase/Neon) requires TLS. asyncpg takes ssl="require";
+# psycopg2 takes sslmode="require".
+_async_connect_args = {"ssl": "require"} if settings.DB_SSL else {}
+_sync_connect_args = {"sslmode": "require"} if settings.DB_SSL else {}
+
+
 # --- Async (API) -----------------------------------------------------------
 async_engine = create_async_engine(
     settings.DATABASE_URL,
@@ -34,6 +40,7 @@ async_engine = create_async_engine(
     pool_size=10,
     max_overflow=20,
     echo=False,
+    connect_args=_async_connect_args,
 )
 
 AsyncSessionFactory = async_sessionmaker(
@@ -59,11 +66,53 @@ sync_engine = create_engine(
     pool_size=5,
     max_overflow=10,
     echo=False,
+    connect_args=_sync_connect_args,
 )
 
 sync_session_factory: sessionmaker[Session] = sessionmaker(
     bind=sync_engine, expire_on_commit=False
 )
+
+
+# Columns added after the first deployment. ``create_all`` only creates missing
+# TABLES, so new columns on existing tables are added here (idempotent) until a
+# real Alembic migration chain exists. (table, column, DDL type/default)
+_ADDED_COLUMNS: tuple[tuple[str, str, str], ...] = (
+    ("articles", "resolved_url", "VARCHAR(2048)"),
+    ("ias_transfers", "enrichment_attempts", "INTEGER NOT NULL DEFAULT 0"),
+    ("ias_transfers", "source_headline", "VARCHAR(1024)"),
+    ("ias_transfers", "last_enriched_at", "TIMESTAMP WITH TIME ZONE"),
+)
+
+
+def ensure_schema() -> None:
+    """Create missing tables and add missing columns (idempotent, sync)."""
+    import app.models  # noqa: F401 — register all tables on Base.metadata
+    from sqlalchemy import inspect, text
+
+    Base.metadata.create_all(sync_engine)
+    with sync_engine.begin() as conn:
+        insp = inspect(conn)
+        for table, column, ddl in _ADDED_COLUMNS:
+            if table not in insp.get_table_names():
+                continue
+            existing = {c["name"] for c in insp.get_columns(table)}
+            if column not in existing:
+                conn.execute(text(f"ALTER TABLE {table} ADD COLUMN IF NOT EXISTS {column} {ddl}"))
+
+
+def check_connection(timeout_seconds: float = 5.0) -> tuple[bool, str | None]:
+    """Cheap liveness probe for /health. Returns (ok, error message)."""
+    from sqlalchemy import text
+
+    try:
+        with sync_engine.connect().execution_options(
+            timeout=timeout_seconds
+        ) as conn:
+            conn.execute(text("SELECT 1"))
+        return True, None
+    except Exception as exc:  # noqa: BLE001
+        return False, str(exc).splitlines()[0][:300]
 
 
 @contextmanager

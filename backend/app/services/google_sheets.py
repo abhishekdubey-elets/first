@@ -122,10 +122,9 @@ def _find_row(ws, dedup_key: str) -> int | None:
     """Return the 1-based row index whose key column matches, else None."""
     if not dedup_key:
         return None
-    try:
-        keys = ws.col_values(KEY_COL)
-    except Exception:  # noqa: BLE001
-        return None
+    # Let API errors propagate: treating a failed lookup as "not present" would
+    # append a duplicate row on the next attempt.
+    keys = ws.col_values(KEY_COL)
     for idx, value in enumerate(keys, start=1):
         if value == dedup_key:
             return idx
@@ -137,6 +136,14 @@ def upsert_transfer(t: Any) -> int:
     ws = _worksheet()
     row = build_row(t) + [t.dedup_key]
     existing_row = t.sheet_row or _find_row(ws, t.dedup_key)
+    # A cached row index can go stale (sheet re-sorted, rows deleted, target
+    # sheet changed): only trust it if that row still carries our key.
+    if existing_row and existing_row > 1:
+        try:
+            if ws.cell(existing_row, KEY_COL).value != t.dedup_key:
+                existing_row = _find_row(ws, t.dedup_key)
+        except Exception:  # noqa: BLE001
+            existing_row = _find_row(ws, t.dedup_key)
 
     if existing_row and existing_row > 1:
         end_a1 = gspread.utils.rowcol_to_a1(existing_row, KEY_COL)
@@ -144,8 +151,19 @@ def upsert_transfer(t: Any) -> int:
         log.info("sheet_row_updated", row=existing_row, key=t.dedup_key)
         return existing_row
 
-    ws.append_row(row, value_input_option="RAW")
-    new_row = len(ws.col_values(KEY_COL))
+    res = ws.append_row(row, value_input_option="RAW")
+    # The append response names the written range (e.g. "Transfers!A42:T42");
+    # read the row from it instead of re-fetching the whole key column.
+    new_row = 0
+    try:
+        import re as _re
+
+        m = _re.search(r"!?[A-Z]+(\d+):", res["updates"]["updatedRange"])
+        new_row = int(m.group(1)) if m else 0
+    except Exception:  # noqa: BLE001
+        new_row = 0
+    if not new_row:
+        new_row = len(ws.col_values(KEY_COL))
     log.info("sheet_row_appended", row=new_row, key=t.dedup_key)
     return new_row
 
@@ -158,3 +176,5 @@ def sheet_health() -> dict[str, Any]:
         return {"connected": True, "total_rows": rows, "error": None}
     except GoogleSheetsError as exc:
         return {"connected": False, "total_rows": 0, "error": str(exc)}
+    except Exception as exc:  # noqa: BLE001 - gspread APIError (403/404/429) etc.
+        return {"connected": False, "total_rows": 0, "error": f"{type(exc).__name__}: {exc}"[:500]}

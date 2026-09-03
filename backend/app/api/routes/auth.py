@@ -1,6 +1,8 @@
 """Authentication routes."""
 from __future__ import annotations
 
+import asyncio
+
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -19,7 +21,12 @@ async def login(payload: LoginRequest, db: AsyncSession = Depends(get_db)) -> To
     user = (
         await db.execute(select(User).where(User.email == payload.email))
     ).scalar_one_or_none()
-    if not user or not verify_password(payload.password, user.hashed_password):
+    # bcrypt is ~250ms of CPU: keep it off the event loop so one login cannot
+    # stall every other request.
+    ok = bool(user) and await asyncio.to_thread(
+        verify_password, payload.password, user.hashed_password
+    )
+    if not ok:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Incorrect email or password",

@@ -1,9 +1,11 @@
 """Settings page: runtime config, Google credentials upload, model selection."""
 from __future__ import annotations
 
+import json
+import os
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, File, UploadFile
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 
 from app.api.deps import get_current_user, require_admin
 from app.core.config import settings as env_settings
@@ -61,10 +63,22 @@ async def upload_credentials(
     file: UploadFile = File(...), _: object = Depends(require_admin)
 ):
     """Upload the Google service-account JSON to the secrets volume."""
+    data = await file.read()
+    if len(data) > 64 * 1024:
+        raise HTTPException(400, "Credentials file too large (expected a small JSON key).")
+    try:
+        obj = json.loads(data)
+        assert isinstance(obj, dict) and obj.get("type") == "service_account"
+        assert obj.get("client_email") and obj.get("private_key")
+    except Exception:  # noqa: BLE001
+        raise HTTPException(400, "Not a Google service-account JSON key file.")
     dest = Path(env_settings.GOOGLE_CREDENTIALS_FILE)
     dest.parent.mkdir(parents=True, exist_ok=True)
-    dest.write_bytes(await file.read())
-    return {"uploaded": True, "path": str(dest)}
+    # Write atomically so a half-uploaded file never replaces a working one.
+    tmp = dest.with_suffix(".tmp")
+    tmp.write_bytes(data)
+    os.replace(tmp, dest)
+    return {"uploaded": True, "path": str(dest), "client_email": obj.get("client_email")}
 
 
 @router.get("/models")
@@ -72,8 +86,6 @@ async def available_models(_: object = Depends(get_current_user)):
     """Which providers are usable given the current env (for the model picker)."""
     return {
         "providers": [
-            {"id": "ollama", "label": "Local (Ollama, open-source)",
-             "available": llm.is_available("ollama"), "model": env_settings.OLLAMA_MODEL},
             {"id": "openai", "label": "OpenAI GPT",
              "available": llm.is_available("openai"), "model": env_settings.OPENAI_MODEL},
             {"id": "anthropic", "label": "Anthropic Claude",

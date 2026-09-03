@@ -27,6 +27,8 @@ class Article(Base):
     # Identity / discovery
     url: Mapped[str] = mapped_column(String(2048), unique=True, index=True)
     url_hash: Mapped[str] = mapped_column(String(64), unique=True, index=True)
+    # Publisher URL behind a Google News redirect link (resolved at discovery).
+    resolved_url: Mapped[str | None] = mapped_column(String(2048))
     title: Mapped[str | None] = mapped_column(String(1024))
     source_name: Mapped[str | None] = mapped_column(String(255), index=True)
     publication: Mapped[str | None] = mapped_column(String(255))
@@ -59,3 +61,8 @@ class Article(Base):
     transfers = relationship(
         "IasTransfer", back_populates="article", cascade="all, delete-orphan"
     )
+
+    @property
+    def best_url(self) -> str:
+        """The URL worth reading/linking: the resolved publisher URL if known."""
+        return self.resolved_url or self.url

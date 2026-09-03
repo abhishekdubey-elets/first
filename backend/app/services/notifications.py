@@ -47,8 +47,13 @@ def _send_email(subject: str, body: str) -> None:
         msg["From"] = settings.SMTP_USER or "noreply@digitallearning.in"
         msg["To"] = settings.ALERT_EMAIL_TO
         msg.set_content(body)
-        with smtplib.SMTP(settings.SMTP_HOST, settings.SMTP_PORT, timeout=15) as s:
-            s.starttls()
+        if int(settings.SMTP_PORT) == 465:
+            smtp = smtplib.SMTP_SSL(settings.SMTP_HOST, settings.SMTP_PORT, timeout=15)
+        else:
+            smtp = smtplib.SMTP(settings.SMTP_HOST, settings.SMTP_PORT, timeout=15)
+        with smtp as s:
+            if int(settings.SMTP_PORT) != 465:
+                s.starttls()
             if settings.SMTP_USER:
                 s.login(settings.SMTP_USER, settings.SMTP_PASSWORD)
             s.send_message(msg)

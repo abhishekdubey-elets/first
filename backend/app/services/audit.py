@@ -36,9 +36,9 @@ def log_event(
     db.flush()
     _stdout.info(
         "agent_event",
-        level=level.value,
+        audit_level=level.value,
         agent=agent,
         action=action,
         message=message,
-        **(context or {}),
+        context=context or {},
     )

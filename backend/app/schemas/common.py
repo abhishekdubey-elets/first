@@ -30,6 +30,8 @@ class ArticleOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
     id: int
     url: str
+    # Publisher URL behind a Google News redirect (None when not resolved).
+    resolved_url: str | None = None
     title: str | None
     source_name: str | None
     language: str | None
@@ -37,6 +39,8 @@ class ArticleOut(BaseModel):
     status: str
     relevance_score: float | None
     created_at: datetime
+    # Number of transfer records extracted from this article.
+    transfers_count: int = 0
 
 
 # --- Logs ------------------------------------------------------------------
@@ -94,3 +98,9 @@ class StatsOut(BaseModel):
     verified: int
     exported: int
     by_state: list[dict]
+    # News-feed signals for the dashboard hero.
+    news_total: int = 0
+    news_today: int = 0
+    news_week: int = 0
+    news_pending: int = 0
+    last_cycle_at: datetime | None = None

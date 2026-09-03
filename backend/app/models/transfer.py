@@ -52,6 +52,9 @@ class IasTransfer(Base):
     gov_order_link: Mapped[str | None] = mapped_column(String(2048))
     source_name: Mapped[str | None] = mapped_column(String(255))
     source_url: Mapped[str | None] = mapped_column(String(2048))
+    # Headline of the article this came from. Copied onto the record so it
+    # survives the news-retention purge, which detaches the article.
+    source_headline: Mapped[str | None] = mapped_column(String(1024))
 
     # --- Trust / dedup -----------------------------------------------------
     confidence_score: Mapped[float] = mapped_column(Float, default=0.0, index=True)
@@ -69,6 +72,11 @@ class IasTransfer(Base):
 
     # Google Sheets bookkeeping
     sheet_row: Mapped[int | None] = mapped_column(Integer)
+
+    # Web-enrichment bookkeeping: bounded attempts so records whose gaps can't
+    # be filled don't cost a web search + LLM call on every cycle forever.
+    enrichment_attempts: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+    last_enriched_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
     article_id: Mapped[int | None] = mapped_column(
         ForeignKey("articles.id", ondelete="SET NULL")

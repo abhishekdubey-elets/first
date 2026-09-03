@@ -30,28 +30,33 @@ class ExtractionAgent(BaseAgent):
     name = "extraction"
 
     def run(self, article: Article) -> bool:
-        """Populate ``article`` with full text + media. Returns success."""
-        url = article.url
-        if not self.allowed_by_robots(url):
-            article.status = ArticleStatus.IRRELEVANT
-            article.error = "Disallowed by robots.txt"
-            self.audit("extract", f"Skipped (robots.txt): {url}",
-                       level=LogLevel.WARNING, article_id=article.id)
-            return False
+        """Populate ``article`` with full text + media. Returns success.
 
-        try:
-            resp = self.http_get(url)
-            resp.raise_for_status()
-            html = resp.text
-            final_url = str(resp.url)
-        except Exception as exc:  # noqa: BLE001
-            article.status = ArticleStatus.FAILED
-            article.error = f"Fetch failed: {exc}"
-            self.audit("extract", f"Fetch failed: {url}", level=LogLevel.ERROR,
-                       article_id=article.id, error=str(exc))
-            return False
+        The page body is best-effort: Google News discovery links are encoded
+        redirect URLs that can't be fetched (robots-disallowed / HTTP 400), and
+        some publishers paywall or JS-render their text. Rather than dropping
+        the article in those cases, we fall back to the HEADLINE — the
+        Information Agent is designed to extract from sparse text and the
+        Enrichment Agent backfills missing fields via web search on the next
+        cycle. We only give up when there is no usable text at all.
+        """
+        # Prefer the publisher URL resolved at discovery: Google News redirect
+        # links cannot be fetched by a bot, the real article can.
+        url = article.resolved_url or article.url
+        text, images, links, final_url = "", [], [], url
 
-        text, images, links = self._parse_html(html, final_url)
+        if self.allowed_by_robots(url):
+            try:
+                resp = self.http_get(url)
+                resp.raise_for_status()
+                final_url = str(resp.url)
+                text, images, links = self._parse_html(resp.text, final_url)
+            except Exception as exc:  # noqa: BLE001 — fall back to the headline
+                self.audit("extract", f"Fetch failed, using headline: {url}",
+                           level=LogLevel.WARNING, article_id=article.id, error=str(exc))
+        else:
+            self.audit("extract", f"Robots-disallowed, using headline: {url}",
+                       level=LogLevel.INFO, article_id=article.id)
 
         pdfs = [l for l in links if l.lower().endswith(".pdf")]
         gov_links = [l for l in links if _looks_like_gov_order(l)]
@@ -63,7 +68,22 @@ class ExtractionAgent(BaseAgent):
                 if ocr_text.strip():
                     text += f"\n\n[GOVERNMENT ORDER PDF: {pdf}]\n{ocr_text}"
 
-        article.full_text = (text or article.title or "")[:60000]
+        # Use the fetched body when it's substantial; otherwise lean on the
+        # headline so the article still gets a chance at extraction.
+        body = (text or "").strip()
+        full_text = body if len(body) >= 200 else (article.title or body or "").strip()
+        if not full_text:
+            article.status = ArticleStatus.IRRELEVANT
+            article.error = "No usable text (empty body and no headline)"
+            self.audit("extract", f"No usable text: {url}",
+                       level=LogLevel.WARNING, article_id=article.id)
+            return False
+
+        article.full_text = full_text[:60000]
+        # Remember where the text actually came from (after redirects) so the
+        # transfer's source link points at the publisher, not a redirector.
+        if final_url and final_url != article.url and not article.resolved_url:
+            article.resolved_url = final_url[:2048]
         article.images = images[:20]
         article.pdf_links = pdfs[:20]
         article.gov_order_links = list(dict.fromkeys(gov_links))[:20]

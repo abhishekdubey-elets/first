@@ -27,6 +27,12 @@ def test_health_ok():
     resp = client.get("/health")
     assert resp.status_code == 200
     body = resp.json()
-    assert body["status"] == "ok"
-    # The endpoint also returns the app version.
+    # "ok" with a reachable database, "degraded" (but still 200 and alive)
+    # without one — the process never crashes on a DB problem.
+    assert body["status"] in ("ok", "degraded")
+    assert body["database"]["ok"] == (body["status"] == "ok")
+    if body["status"] == "degraded":
+        assert body["database"]["error"]
+    # The endpoint also returns the app version and scheduler info.
     assert "version" in body
+    assert "interval_seconds" in body["scheduler"]

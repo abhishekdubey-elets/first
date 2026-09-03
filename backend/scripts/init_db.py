@@ -8,17 +8,14 @@ the Docker entrypoint so the stack comes up working with one command.
 """
 from __future__ import annotations
 
-from sqlalchemy import create_engine
-
-from app.core.config import settings
-from app.core.database import Base
-import app.models  # noqa: F401 — register all tables on Base.metadata
+from app.core.database import ensure_schema
 
 
 def main() -> None:
-    engine = create_engine(settings.DATABASE_URL_SYNC)
-    Base.metadata.create_all(engine)
-    print("✓ Database tables ensured.")
+    # Uses the configured engine (honours DB_SSL for Supabase/Neon). Creates
+    # missing tables AND adds columns introduced after the first deployment.
+    ensure_schema()
+    print("Database schema ensured.")
 
 
 if __name__ == "__main__":

@@ -45,6 +45,9 @@ async def ask(
         d = {f: getattr(r, f, None) for f in _FIELDS}
         d["status"] = r.status.value if r.status else None
         records.append(d)
+    # Release the pooled connection now: the LLM calls below can take a long
+    # time and must not hold a DB connection hostage.
+    await db.commit()
 
     # Embedding + LLM calls are blocking — run off the event loop.
     return await asyncio.to_thread(rag.answer, question, records)

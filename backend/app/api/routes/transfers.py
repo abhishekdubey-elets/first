@@ -2,13 +2,13 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import func, or_, select
+from sqlalchemy import func, nullslast, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.api.deps import Pagination, get_current_user
 from app.core.database import get_db
-from app.models import IasTransfer
+from app.models import Article, IasTransfer
 from app.schemas.transfer import TransferListOut, TransferOut
 
 router = APIRouter(prefix="/transfers", tags=["transfers"])
@@ -33,7 +33,7 @@ async def list_transfers(
     cadre: str | None = None,
     source: str | None = None,
     status: str | None = None,
-    sort: str = Query("created_at"),
+    sort: str = Query("news_date"),
     order: str = Query("desc", pattern="^(asc|desc)$"),
 ):
     stmt = select(IasTransfer)
@@ -70,11 +70,19 @@ async def list_transfers(
         select(func.count()).select_from(stmt.subquery())
     )).scalar_one()
 
-    col = _SORT_FIELDS.get(sort, IasTransfer.created_at)
-    col = col.asc() if order == "asc" else col.desc()
+    # "news_date" sorts by the source article's publication date (latest first
+    # by default), which isn't a column on the transfer — join the article.
+    if sort == "news_date":
+        pub = Article.published_at
+        pub = pub.asc() if order == "asc" else pub.desc()
+        order_by = [nullslast(pub), IasTransfer.created_at.desc()]
+        stmt = stmt.outerjoin(Article, Article.id == IasTransfer.article_id)
+    else:
+        col = _SORT_FIELDS.get(sort, IasTransfer.created_at)
+        order_by = [col.asc() if order == "asc" else col.desc()]
     stmt = (
         stmt.options(selectinload(IasTransfer.article))
-        .order_by(col)
+        .order_by(*order_by)
         .offset(pg.offset)
         .limit(pg.page_size)
     )

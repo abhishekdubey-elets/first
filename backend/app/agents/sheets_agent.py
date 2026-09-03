@@ -13,18 +13,34 @@ from app.services import google_sheets
 from app.services.app_settings import get_export_config
 
 
+# Only records the validation step signed off on go to the sheet. PENDING
+# (low confidence) and CONFLICTED (sources disagree) stay in the dashboard for
+# review; EXPORTED rows are re-exported when they change.
+EXPORTABLE = (TransferStatus.VERIFIED, TransferStatus.EXPORT_FAILED,
+              TransferStatus.EXPORTED)
+
+
 class SheetsAgent(BaseAgent):
     name = "sheets"
+
+    def __init__(self, db=None):
+        super().__init__(db)
+        self._warned_unconfigured = False
 
     def export(self, transfer: IasTransfer) -> bool:
         """Upsert a single transfer to the sheet. Returns success."""
         cfg = get_export_config()
         if not cfg.get("auto_export"):
             return False
+        if transfer.status not in EXPORTABLE:
+            return False
         if not cfg.get("credentials_uploaded") or not cfg.get("spreadsheet_id"):
-            self.audit("export", "Sheets export skipped: not configured",
-                       level=LogLevel.WARNING, transfer_id=transfer.id)
-            self._log_sync(SyncStatus.SKIPPED, 0, 0, "Sheets not configured")
+            if not self._warned_unconfigured:
+                # One warning per agent instance, not one per record per cycle.
+                self._warned_unconfigured = True
+                self.audit("export", "Sheets export skipped: not configured",
+                           level=LogLevel.WARNING, transfer_id=transfer.id)
+                self._log_sync(SyncStatus.SKIPPED, 0, 0, "Sheets not configured")
             return False
         try:
             row = google_sheets.upsert_transfer(transfer)

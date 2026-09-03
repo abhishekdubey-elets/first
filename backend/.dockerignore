@@ -1,0 +1,16 @@
+# Never ship these into the image / Hugging Face Space.
+.venv/
+venv/
+.env
+*.env
+!.env.example
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+storage/
+data/
+*.log
+.git/
+.gitignore
+secret.tmp
