@@ -17,7 +17,7 @@ import { motion } from 'framer-motion';
 import { cn } from '@/lib/utils';
 
 const nav = [
-  { href: '/', label: 'Dashboard', icon: LayoutDashboard },
+  { href: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
   { href: '/assistant', label: 'Assistant', icon: Sparkles },
   { href: '/transfers', label: 'Transfer Explorer', icon: ArrowLeftRight },
   { href: '/analytics', label: 'Analytics', icon: BarChart3 },
@@ -36,7 +36,7 @@ export function Sidebar({
   const pathname = usePathname();
 
   const isActive = (href: string) =>
-    href === '/' ? pathname === '/' : pathname.startsWith(href);
+    href === '/dashboard' ? pathname === '/dashboard' : pathname.startsWith(href);
 
   return (
     <>
@@ -55,7 +55,7 @@ export function Sidebar({
         )}
       >
         <div className="flex items-center justify-between px-5 py-5">
-          <Link href="/" className="flex items-center gap-2.5">
+          <Link href="/dashboard" className="flex items-center gap-2.5">
             <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-accent-gradient shadow-glow">
               <Radar className="h-5 w-5 text-white" />
             </div>

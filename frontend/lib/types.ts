@@ -8,7 +8,7 @@ export type TransferStatus =
   | 'export_failed';
 
 export interface Transfer {
-  id: string;
+  id: number;
   officer_name: string;
   ias_batch: string;
   cadre: string;
@@ -18,8 +18,10 @@ export interface Transfer {
   previous_posting: string;
   new_district: string;
   new_posting: string;
+  // Free-form text as written in the article (may not be parseable).
   transfer_date: string;
   effective_date: string;
+  // Article publication date (ISO), when known.
   news_date: string | null;
   reason: string;
   notification_number: string;
@@ -41,14 +43,16 @@ export type ArticleStatus =
   | 'failed';
 
 export interface Article {
-  id: string;
+  id: number;
   url: string;
-  title: string;
-  source_name: string;
-  language: string;
-  published_at: string;
+  resolved_url: string | null;
+  title: string | null;
+  source_name: string | null;
+  language: string | null;
+  published_at: string | null;
   status: ArticleStatus;
-  relevance_score: number;
+  relevance_score: number | null;
+  transfers_count: number;
   created_at: string;
 }
 
@@ -86,6 +90,10 @@ export interface Stats {
   verified: number;
   exported: number;
   by_state: ByState[];
+  news_today: number;
+  news_week: number;
+  news_total: number;
+  last_cycle_at: string | null;
 }
 
 export interface Analytics {
@@ -112,6 +120,21 @@ export interface AuthUser {
 export interface LoginResponse {
   access_token: string;
   token_type: string;
+}
+
+export interface AgentStatus {
+  last_run: string | null;
+  summary: {
+    articles?: number;
+    transfers?: number;
+    new?: number;
+    exported?: number;
+  } | null;
+  interval_seconds: number;
+  running: boolean;
+  started_at: string | null;
+  last_error: string | null;
+  next_run: string | null;
 }
 
 export interface SyncStatus {
@@ -169,7 +192,7 @@ export interface TransfersQuery {
   cadre?: string;
   source?: string;
   status?: string;
-  sort?: 'created_at' | 'transfer_date' | 'officer';
+  sort?: 'news_date' | 'created_at' | 'transfer_date' | 'officer';
   order?: 'asc' | 'desc';
 }
 
@@ -204,4 +227,12 @@ export interface NewsQuery {
   page?: number;
   page_size?: number;
   status?: string;
+  /** Title substring search. */
+  q?: string;
+  /** Only articles that produced at least one transfer record. */
+  with_transfers?: boolean;
+  /** Only articles published/discovered in the last N days. */
+  days?: number;
+  /** Hide articles with status 'irrelevant' or 'failed'. */
+  exclude_irrelevant?: boolean;
 }

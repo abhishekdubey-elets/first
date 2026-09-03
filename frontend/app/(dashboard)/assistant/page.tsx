@@ -82,7 +82,7 @@ export default function AssistantPage() {
         {
           role: 'assistant',
           content:
-            'Sorry — I couldn’t generate an answer (the local model may be busy). Please try again.',
+            'Sorry — I couldn’t generate an answer right now. Please try again in a moment.',
         },
       ]);
     },

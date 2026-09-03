@@ -12,27 +12,15 @@ import { GlassCard } from '@/components/GlassCard';
 import { FilterBar, TextField, SelectField } from '@/components/FilterBar';
 import { DataTable, Column } from '@/components/DataTable';
 import { Pagination } from '@/components/Pagination';
-import { StatusBadge } from '@/components/StatusBadge';
 import { EmptyState } from '@/components/EmptyState';
 import { TableSkeleton } from '@/components/Skeleton';
-import { fmtDate } from '@/lib/format';
+import { fmtDate, safeDate } from '@/lib/format';
 
 const PAGE_SIZE = 12;
 
-const statusOptions = [
-  { value: '', label: 'Any status' },
-  { value: 'pending', label: 'Pending' },
-  { value: 'verified', label: 'Verified' },
-  { value: 'conflicted', label: 'Conflicted' },
-  { value: 'exported', label: 'Exported' },
-  { value: 'export_failed', label: 'Export failed' },
-];
-
 const sortOptions = [
-  { value: 'created_at:desc', label: 'Newest first' },
-  { value: 'created_at:asc', label: 'Oldest first' },
-  { value: 'transfer_date:desc', label: 'Transfer date ↓' },
-  { value: 'transfer_date:asc', label: 'Transfer date ↑' },
+  { value: 'news_date:desc', label: 'Latest news first' },
+  { value: 'news_date:asc', label: 'Oldest news first' },
   { value: 'officer:asc', label: 'Officer A–Z' },
 ];
 
@@ -48,8 +36,7 @@ function TransfersExplorer() {
   const [batch, setBatch] = useState('');
   const [cadre, setCadre] = useState('');
   const [source, setSource] = useState('');
-  const [status, setStatus] = useState('');
-  const [sortSel, setSortSel] = useState('created_at:desc');
+  const [sortSel, setSortSel] = useState('news_date:desc');
 
   useEffect(() => {
     setQ(initialQ);
@@ -71,7 +58,6 @@ function TransfersExplorer() {
     batch: batch || undefined,
     cadre: cadre || undefined,
     source: source || undefined,
-    status: status || undefined,
     sort,
     order,
   };
@@ -90,8 +76,7 @@ function TransfersExplorer() {
     setBatch('');
     setCadre('');
     setSource('');
-    setStatus('');
-    setSortSel('created_at:desc');
+    setSortSel('news_date:desc');
     setPage(1);
   };
 
@@ -139,15 +124,32 @@ function TransfersExplorer() {
     { key: 'state', header: 'State', render: (r) => r.state || '—' },
     {
       key: 'date',
-      header: 'Transfer date',
-      render: (r) => (
-        <span className="text-slate-400">{fmtDate(r.transfer_date)}</span>
-      ),
-    },
-    {
-      key: 'status',
-      header: 'Status',
-      render: (r) => <StatusBadge status={r.status} />,
+      header: 'Date',
+      render: (r) => {
+        // Prefer a parseable transfer date; then the article's publication
+        // date (flagged as "news"); then whatever free-form text we have.
+        if (safeDate(r.transfer_date)) {
+          return <span className="text-slate-400">{fmtDate(r.transfer_date)}</span>;
+        }
+        if (safeDate(r.news_date)) {
+          return (
+            <span className="text-slate-400">
+              {fmtDate(r.news_date)}
+              <span className="ml-1 text-[10px] uppercase tracking-wide text-slate-500">
+                news
+              </span>
+            </span>
+          );
+        }
+        if (r.transfer_date && r.transfer_date.trim()) {
+          return (
+            <span className="text-slate-400" title="As written in the source">
+              {r.transfer_date}
+            </span>
+          );
+        }
+        return <span className="text-slate-500">—</span>;
+      },
     },
   ];
 
@@ -166,7 +168,6 @@ function TransfersExplorer() {
         <TextField label="Batch" value={batch} onChange={(v) => { setBatch(v); setPage(1); }} placeholder="e.g. 2011" />
         <TextField label="Cadre" value={cadre} onChange={(v) => { setCadre(v); setPage(1); }} placeholder="cadre" />
         <TextField label="Source" value={source} onChange={(v) => { setSource(v); setPage(1); }} placeholder="source name" />
-        <SelectField label="Status" value={status} onChange={(v) => { setStatus(v); setPage(1); }} options={statusOptions} />
         <SelectField label="Sort by" value={sortSel} onChange={(v) => { setSortSel(v); setPage(1); }} options={sortOptions} />
       </FilterBar>
 
@@ -190,7 +191,7 @@ function TransfersExplorer() {
           <DataTable
             columns={columns}
             rows={data?.items ?? []}
-            rowKey={(r) => r.id}
+            rowKey={(r) => String(r.id)}
             empty={
               <EmptyState
                 title="No matching transfers"

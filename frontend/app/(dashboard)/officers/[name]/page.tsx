@@ -21,7 +21,19 @@ import { GlassCard } from '@/components/GlassCard';
 import { StatusBadge } from '@/components/StatusBadge';
 import { EmptyState } from '@/components/EmptyState';
 import { Skeleton } from '@/components/Skeleton';
-import { fmtDate } from '@/lib/format';
+import { fmtDate, safeDate } from '@/lib/format';
+
+// Best-effort timestamp for ordering: parseable transfer date, else the
+// article's publication date, else when we discovered the record.
+function sortKey(t: Transfer): number {
+  return (
+    (
+      safeDate(t.transfer_date) ??
+      safeDate(t.news_date) ??
+      safeDate(t.created_at)
+    )?.getTime() ?? 0
+  );
+}
 
 export default function OfficerProfilePage() {
   const params = useParams<{ name: string }>();
@@ -32,16 +44,18 @@ export default function OfficerProfilePage() {
     queryFn: () => getOfficerTransfers(name),
   });
 
-  // Most recent first for the timeline & "current posting".
+  // The backend matches officer names by substring, so narrow to exact
+  // (case-insensitive, trimmed) matches; most recent first for the timeline
+  // & "current posting". `transfer_date` is free-form text, so never feed it
+  // straight into `new Date()`.
   const sorted = useMemo(() => {
-    const list = [...(data ?? [])];
-    list.sort((a, b) => {
-      const da = new Date(a.transfer_date || a.created_at).getTime();
-      const db = new Date(b.transfer_date || b.created_at).getTime();
-      return db - da;
-    });
+    const target = name.trim().toLowerCase();
+    const list = (data ?? []).filter(
+      (t) => (t.officer_name ?? '').trim().toLowerCase() === target,
+    );
+    list.sort((a, b) => sortKey(b) - sortKey(a));
     return list;
-  }, [data]);
+  }, [data, name]);
 
   const current = sorted[0];
 

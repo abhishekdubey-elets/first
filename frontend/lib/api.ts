@@ -15,6 +15,7 @@ import type {
   Transfer,
   TransfersQuery,
 } from './types';
+import type { AgentStatus } from './types';
 
 export const API_BASE_URL =
   process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:8000';
@@ -104,7 +105,7 @@ export async function getTransfers(
   return data;
 }
 
-export async function getTransfer(id: string): Promise<Transfer> {
+export async function getTransfer(id: number | string): Promise<Transfer> {
   const { data } = await api.get<Transfer>(`/api/v1/transfers/${id}`);
   return data;
 }
@@ -202,15 +203,20 @@ export async function updateOpenAiKey(
 }
 
 // ---------- Agents ----------
-export async function runAgents(): Promise<{ queued: boolean; task_id: string }> {
+export async function getAgentStatus(): Promise<AgentStatus> {
+  const { data } = await api.get('/api/v1/agents/status');
+  return data;
+}
+
+export async function runAgents(): Promise<{
+  started: boolean;
+  already_running?: boolean;
+}> {
   const { data } = await api.post('/api/v1/agents/run');
   return data;
 }
 
-export async function discoverAgents(): Promise<{
-  queued: boolean;
-  task_id: string;
-}> {
+export async function discoverAgents(): Promise<{ started: boolean }> {
   const { data } = await api.post('/api/v1/agents/discover');
   return data;
 }

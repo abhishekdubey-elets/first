@@ -1,9 +1,10 @@
 'use client';
 
 import { useState, useEffect } from 'react';
+import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { motion } from 'framer-motion';
-import { Radar, Mail, Lock, Loader2, AlertCircle } from 'lucide-react';
+import { Radar, Mail, Lock, Loader2, AlertCircle, ArrowLeft } from 'lucide-react';
 import { login, setToken, getToken } from '@/lib/api';
 
 export default function LoginPage() {
@@ -14,7 +15,7 @@ export default function LoginPage() {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    if (getToken()) router.replace('/');
+    if (getToken()) router.replace('/dashboard');
   }, [router]);
 
   const onSubmit = async (e: React.FormEvent) => {
@@ -25,12 +26,19 @@ export default function LoginPage() {
       const res = await login(email.trim(), password);
       if (!res?.access_token) throw new Error('No token returned');
       setToken(res.access_token);
-      router.replace('/');
+      router.replace('/dashboard');
     } catch (err: unknown) {
-      const msg =
-        (err as { response?: { data?: { detail?: string } } })?.response?.data
-          ?.detail || 'Invalid email or password. Please try again.';
-      setError(msg);
+      // FastAPI returns a string `detail` for auth errors but an ARRAY for
+      // 422 validation errors — never render a non-string as a React child.
+      const e = err as { response?: { data?: { detail?: unknown } } };
+      const d = e?.response?.data?.detail;
+      setError(
+        typeof d === 'string'
+          ? d
+          : e?.response
+            ? 'Invalid email or password.'
+            : 'Cannot reach the server.',
+      );
     } finally {
       setLoading(false);
     }
@@ -44,6 +52,12 @@ export default function LoginPage() {
         transition={{ duration: 0.4 }}
         className="w-full max-w-md"
       >
+        <Link
+          href="/"
+          className="mb-6 inline-flex items-center gap-1.5 text-sm text-slate-400 transition hover:text-white"
+        >
+          <ArrowLeft className="h-4 w-4" /> Back to home
+        </Link>
         <div className="mb-7 flex flex-col items-center text-center">
           <div className="mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-accent-gradient shadow-glow">
             <Radar className="h-7 w-7 text-white" />

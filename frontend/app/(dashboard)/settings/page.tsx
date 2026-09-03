@@ -45,9 +45,13 @@ export default function SettingsPage() {
   const [autoExport, setAutoExport] = useState(false);
   const [openaiKey, setOpenaiKey] = useState('');
   const fileRef = useRef<HTMLInputElement>(null);
+  // Seed the form from the server exactly once; later refetches must not
+  // clobber unsaved edits.
+  const seeded = useRef(false);
 
   useEffect(() => {
-    if (settingsQ.data) {
+    if (settingsQ.data && !seeded.current) {
+      seeded.current = true;
       setSpreadsheetId(settingsQ.data.spreadsheet_id ?? '');
       setWorksheet(settingsQ.data.worksheet_name ?? '');
       setAutoExport(Boolean(settingsQ.data.auto_export));
@@ -335,26 +339,23 @@ export default function SettingsPage() {
       <GlassCard>
         <div className="flex items-center gap-2">
           <Sparkles className="h-4 w-4 text-brand-cyan" />
-          <h3 className="text-sm font-semibold text-white">
-            OpenAI API key{' '}
-            <span className="font-normal text-slate-400">(optional)</span>
-          </h3>
+          <h3 className="text-sm font-semibold text-white">OpenAI API key</h3>
         </div>
         <p className="mt-1.5 text-sm text-slate-400">
-          Add an OpenAI key to run extraction on GPT instead of the local model.
-          Leave it empty to keep using the local Ollama model — the original,
-          key-free behaviour.
+          Powers extraction, the assistant, and embeddings. Set it here, or via
+          the <code className="text-slate-300">OPENAI_API_KEY</code> environment
+          variable on the server.
         </p>
 
         <p
           className={cn(
             'mt-3 text-sm font-medium',
-            s?.openai_configured ? 'text-emerald-300' : 'text-slate-400'
+            s?.openai_configured ? 'text-emerald-300' : 'text-amber-300'
           )}
         >
           {s?.openai_configured
-            ? '● Configured — using OpenAI'
-            : '○ Not configured — using local Ollama'}
+            ? '● Configured'
+            : '○ Not configured — set a key to enable extraction & the assistant'}
         </p>
 
         <div className="mt-4 flex flex-wrap items-end gap-3">

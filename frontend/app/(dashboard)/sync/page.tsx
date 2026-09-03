@@ -43,6 +43,18 @@ export default function SyncPage() {
   const s = statusQ.data;
   const connected = s?.sheet?.connected;
 
+  const retryError = (() => {
+    if (!retry.isError) return null;
+    const e = retry.error as {
+      response?: { status?: number; data?: { detail?: unknown } };
+    };
+    const d = e?.response?.data?.detail;
+    if (e?.response?.status === 403) return 'Retry failed — admin role required.';
+    if (typeof d === 'string' && d.trim()) return `Retry failed — ${d}`;
+    if (!e?.response) return 'Retry failed — cannot reach the server.';
+    return 'Retry failed. Please try again.';
+  })();
+
   const columns: Column<SyncLog>[] = [
     {
       key: 'status',
@@ -108,6 +120,13 @@ export default function SyncPage() {
         <div className="flex items-center gap-2 rounded-xl border border-emerald-500/25 bg-emerald-500/10 px-4 py-2.5 text-sm text-emerald-300">
           <CheckCircle2 className="h-4 w-4" />
           Requeued {fmtNumber(retry.data?.requeued ?? 0)} failed uploads.
+        </div>
+      )}
+
+      {retryError && (
+        <div className="flex items-center gap-2 rounded-xl border border-rose-500/25 bg-rose-500/10 px-4 py-2.5 text-sm text-rose-300">
+          <AlertTriangle className="h-4 w-4 shrink-0" />
+          {retryError}
         </div>
       )}
 
