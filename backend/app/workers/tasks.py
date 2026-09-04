@@ -15,6 +15,7 @@ live state for the dashboard's pipeline card.
 """
 from __future__ import annotations
 
+import re
 import threading
 import traceback
 from collections import Counter, defaultdict
@@ -146,6 +147,68 @@ def normalize_existing_records() -> dict:
     if changed:
         log.info("normalized_existing_records", changes=changed)
     return {"changes": changed}
+
+
+_DEVANAGARI = re.compile(r"[\u0900-\u097F]")
+_TEXT_FIELDS = (
+    "officer_name", "current_designation", "previous_district", "previous_posting",
+    "new_district", "new_posting", "reason", "cadre",
+)
+_ROMANIZE_SYSTEM = (
+    "You convert Indian civil-service transfer records from Hindi to English. For "
+    "each record, transliterate personal names the way Indian English newspapers "
+    "do and translate designations, departments and place names. Keep values that "
+    "are already English unchanged. Return strict JSON: an object with key "
+    "'records', a list in the same order, each with the same keys as the input."
+)
+
+
+def needs_romanization(r: IasTransfer) -> bool:
+    return any(_DEVANAGARI.search(getattr(r, f) or "") for f in _TEXT_FIELDS)
+
+
+def romanize_hindi_records(limit: int | None = None) -> dict:
+    """Translate Hindi-script fields on older records to English.
+
+    The extraction prompt now asks for English output, so this only touches
+    records from before that rule and the occasional slip. It exists because
+    one officer reported in Hindi and English would otherwise be two records
+    that no name matching can join. Batched, so it costs one LLM call per ten
+    records, and bounded per cycle.
+    """
+    from app.services import llm
+    from app.services.normalize import clean
+
+    limit = limit or settings.ENRICHMENT_BATCH_SIZE
+    changed = 0
+    with session_scope() as db:
+        rows = [r for r in db.execute(
+            select(IasTransfer).order_by(IasTransfer.created_at.desc())
+        ).scalars() if needs_romanization(r)][:limit]
+        for i in range(0, len(rows), 10):
+            batch = rows[i : i + 10]
+            payload = [{f: getattr(r, f) or "" for f in _TEXT_FIELDS} for r in batch]
+            try:
+                out = llm.complete_json(_ROMANIZE_SYSTEM,
+                                        "Records:\n" + __import__("json").dumps(payload, ensure_ascii=False))
+                results = out.get("records") if isinstance(out, dict) else None
+            except Exception as exc:  # noqa: BLE001
+                log.warning("romanize_batch_failed", error=str(exc)[:200])
+                continue
+            if not isinstance(results, list) or len(results) != len(batch):
+                continue
+            for r, res in zip(batch, results):
+                if not isinstance(res, dict):
+                    continue
+                for f in _TEXT_FIELDS:
+                    new = clean(res.get(f))
+                    if new and new != (getattr(r, f) or "") and not _DEVANAGARI.search(new):
+                        setattr(r, f, new)
+                        changed += 1
+        db.commit()
+    if changed:
+        log.info("romanized_hindi_records", fields=changed)
+    return {"fields": changed, "records": len(rows)}
 
 
 def _record_day(r: IasTransfer):
@@ -342,6 +405,7 @@ def _run_cycle_locked(trigger: str) -> dict:
             db, time_budget_seconds=settings.CYCLE_TIME_BUDGET_SECONDS
         )
     for key, step in (("normalized", normalize_existing_records),
+                      ("romanized", romanize_hindi_records),
                       ("merged", merge_near_duplicates),
                       ("propagated", propagate_officer_facts)):
         try:

@@ -123,6 +123,13 @@ SYSTEM_PROMPT = (
     "one object per officer.\n"
     "6. confidence_score (0.0-1.0) reflects how clearly the article states the "
     "transfer for THAT officer.\n"
+    "7. LANGUAGE — write every field in English (Latin script), whatever the "
+    "article's language. Transliterate personal names the way Indian English "
+    "news does ('मोहम्मद एजाज' -> 'Mohammad Aijaz', 'रितु वर्मा' -> 'Ritu Verma'); "
+    "translate titles and places ('संयुक्त आयुक्त, नगर निगम करनाल' -> 'Joint "
+    "Commissioner, Municipal Corporation Karnal', 'जिलाधिकारी' -> 'District "
+    "Magistrate'). The same officer must get the same English name in every "
+    "article so records can be matched.\n"
     "Respond with strict JSON only."
 )
 

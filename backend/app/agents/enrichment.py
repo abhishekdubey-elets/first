@@ -33,7 +33,9 @@ _SYSTEM = (
     "cadre. Use null "
     "for anything the results don't clearly state. NEVER use generic labels like "
     "'New posting', 'Extension of service', 'Promotion', 'Transfer'. Only return "
-    "info that is clearly about THIS officer. Respond with strict JSON only."
+    "info that is clearly about THIS officer. Write values in English (Latin "
+    "script), transliterating names and translating titles. Respond with strict "
+    "JSON only."
 )
 
 
