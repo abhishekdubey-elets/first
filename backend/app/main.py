@@ -211,6 +211,7 @@ async def health():
     nxt = next_scheduled_run()
     state = cycle_status()
     processed = (state.get("last_result") or {}).get("processed") or {}
+    failures = await _recent_failures() if ok else []
     return {
         "status": "ok" if ok else "degraded",
         "version": __version__,
@@ -232,8 +233,39 @@ async def health():
             "last_error": state.get("last_error"),
             "last_cycle": {k: processed.get(k) for k in
                            ("articles", "transfers", "new", "failed", "remaining")},
+            # Which articles keep failing and why, so a stuck source can be
+            # spotted without database access. Headlines and URLs are public
+            # news; the error is our own message, truncated.
+            "recent_failures": failures,
         },
     }
+
+
+async def _recent_failures(limit: int = 5) -> list[dict]:
+    from sqlalchemy import select
+
+    from app.core.database import AsyncSessionFactory
+    from app.models import Article
+    from app.models.enums import ArticleStatus
+
+    try:
+        async with AsyncSessionFactory() as db:
+            rows = (await db.execute(
+                select(Article.id, Article.title, Article.source_name, Article.url,
+                       Article.resolved_url, Article.error, Article.updated_at)
+                .where(Article.status == ArticleStatus.FAILED)
+                .order_by(Article.updated_at.desc()).limit(limit)
+            )).all()
+    except Exception as exc:  # noqa: BLE001 — diagnostics must never break /health
+        return [{"error": f"could not read failures: {exc}"[:200]}]
+    return [{
+        "article_id": r.id,
+        "title": (r.title or "")[:160],
+        "source": r.source_name,
+        "url": r.resolved_url or r.url,
+        "error": (r.error or "")[:240],
+        "failed_at": r.updated_at.isoformat() if r.updated_at else None,
+    } for r in rows]
 
 
 api = settings.API_V1_PREFIX
