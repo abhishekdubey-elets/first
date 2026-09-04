@@ -13,6 +13,7 @@ from app.agents.base import BaseAgent
 from app.agents.sources import source_weight
 from app.core.config import settings
 from app.core.india import canonical_state
+from app.services.normalize import norm_batch, strip_state_suffix
 from app.models.article import Article
 from app.models.enums import ArticleStatus, LogLevel
 from app.schemas.transfer import ExtractedTransfer, ExtractionResult
@@ -48,10 +49,13 @@ def _clean_field(v: str | None) -> str | None:
 def _sanitize(t: ExtractedTransfer) -> ExtractedTransfer:
     t.previous_posting = _clean_field(t.previous_posting)
     t.new_posting = _clean_field(t.new_posting)
+    # Batch is only ever a four-digit year.
+    t.ias_batch = norm_batch(t.ias_batch)
     # If a district is actually a state name, promote it to state (if empty) and
-    # null the district so state names never count as districts.
+    # null the district so state names never count as districts. A trailing
+    # ", State" on a district is dropped first ("Imphal, Manipur" -> "Imphal").
     for fld in ("previous_district", "new_district"):
-        raw = _clean_field(getattr(t, fld))
+        raw = _clean_field(strip_state_suffix(getattr(t, fld)))
         if raw and canonical_state(raw):
             if not t.state:
                 t.state = canonical_state(raw)
@@ -88,6 +92,13 @@ SYSTEM_PROMPT = (
     "1a. Any state/cadre you DO report must be an Indian state/UT; if the only "
     "location mentioned is clearly foreign (e.g. Sylhet), treat the article as "
     "out of scope. A missing/unknown state is fine — keep the record, state=null.\n"
+    "1b. Extract ONLY the movements that are the subject of THIS article. Ignore "
+    "'also read' / related-story links, sidebars, and officers mentioned only in "
+    "passing or as background. A record whose state does not match the story is "
+    "almost always such noise.\n"
+    "1c. ias_batch is the officer's IAS batch as a four-digit year ('2009'). "
+    "Capture it from any phrasing: '2009 batch', '2009-batch officer', 'IAS 2009', "
+    "'2009 बैच'. Never put anything but the year in it.\n"
     "2. Capture the officer's PREVIOUS posting and district whenever the text "
     "implies them — e.g. 'transferred from <place>', 'currently <role>', "
     "'<District> Collector/DM', 'replacing / in place of / vice <officer>', "
@@ -120,7 +131,7 @@ SCHEMA_HINT = {
     "transfers": [
         {
             "officer_name": "string|null",
-            "ias_batch": "string|null — e.g. '2009' or '2009 batch'",
+            "ias_batch": "string|null — the IAS batch as a four-digit year, e.g. '2009'",
             "cadre": "string|null — state cadre, e.g. 'UP', 'Maharashtra'",
             "state": "string|null",
             "current_designation": "string|null",

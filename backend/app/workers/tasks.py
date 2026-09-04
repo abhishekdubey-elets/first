@@ -17,10 +17,12 @@ from __future__ import annotations
 
 import threading
 import traceback
+from collections import Counter, defaultdict
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from sqlalchemy import and_, delete, or_, select, update
+from sqlalchemy.orm import selectinload
 
 from app.agents import orchestrator
 from app.core.config import settings
@@ -58,7 +60,7 @@ def _set_state(**changes: Any) -> None:
 
 
 def enrich_incomplete(limit: int | None = None) -> dict:
-    """Web-search to fill gaps (from/to/state/date) on records that are missing them.
+    """Web-search to fill gaps (batch/cadre/state/from/to/date) on records missing them.
 
     Bounded per call AND per record: each record gets at most
     ``ENRICHMENT_MAX_ATTEMPTS`` searches (newest records first). Fields still
@@ -75,6 +77,8 @@ def enrich_incomplete(limit: int | None = None) -> dict:
                 IasTransfer.enrichment_attempts < settings.ENRICHMENT_MAX_ATTEMPTS,
                 or_(
                     IasTransfer.state.is_(None),
+                    IasTransfer.ias_batch.is_(None),
+                    IasTransfer.cadre.is_(None),
                     IasTransfer.transfer_date.is_(None),
                     and_(IasTransfer.new_district.is_(None), IasTransfer.new_posting.is_(None)),
                     and_(IasTransfer.previous_district.is_(None), IasTransfer.previous_posting.is_(None)),
@@ -93,6 +97,180 @@ def enrich_incomplete(limit: int | None = None) -> dict:
                 log.warning("enrich_error", officer=r.officer_name, error=str(exc))
         db.commit()
     return {"candidates": len(rows), "enriched": enriched}
+
+
+# --- data-quality passes -------------------------------------------------------
+# These run every cycle, after extraction and before enrichment, so the web
+# search is not spent on records that are about to be merged or filled from a
+# sibling. All are idempotent and cheap (a few thousand rows, no network).
+
+_PROPAGATED_FIELDS = ("ias_batch", "cadre", "state")
+_MERGE_FILL_FIELDS = (
+    "ias_batch", "cadre", "state", "current_designation", "previous_district",
+    "previous_posting", "new_district", "new_posting", "transfer_date",
+    "effective_date", "reason", "notification_number", "gov_order_link",
+    "source_headline",
+)
+
+
+def normalize_existing_records() -> dict:
+    """Apply the shared normalisers to rows extracted before they existed.
+
+    Batches become four-digit years, districts lose a trailing ", State", and
+    links that only looked like government orders because of a substring match
+    ("border" contains "order") are cleared.
+    """
+    from app.core.india import canonical_state
+    from app.services.normalize import looks_like_gov_order, norm_batch, strip_state_suffix
+
+    changed = 0
+    with session_scope() as db:
+        for r in db.execute(select(IasTransfer)).scalars():
+            if r.ias_batch:
+                nb = norm_batch(r.ias_batch)
+                if nb != r.ias_batch:
+                    r.ias_batch = nb; changed += 1
+            for fld in ("new_district", "previous_district"):
+                v = getattr(r, fld)
+                if v:
+                    s = strip_state_suffix(v)
+                    if s and canonical_state(s):
+                        s = None
+                        if not r.state:
+                            r.state = canonical_state(v.split(",")[-1].strip()) or r.state
+                    if s != v:
+                        setattr(r, fld, s); changed += 1
+            if r.gov_order_link and not looks_like_gov_order(r.gov_order_link):
+                r.gov_order_link = None; changed += 1
+        db.commit()
+    if changed:
+        log.info("normalized_existing_records", changes=changed)
+    return {"changes": changed}
+
+
+def _record_day(r: IasTransfer):
+    from app.services.normalize import parse_loose_date
+
+    parsed = parse_loose_date(r.transfer_date) or parse_loose_date(r.effective_date)
+    if parsed is not None:
+        return parsed.date()
+    nd = r.news_date
+    return (nd or r.created_at).date()
+
+
+def _same_movement(a: IasTransfer, b: IasTransfer, window_days: int) -> bool:
+    """Two records describe one event: same role group, close in time.
+
+    For the catch-all "Other" group the destination posting itself must match,
+    so two unrelated "Other" posts are never folded together.
+    """
+    from app.services.normalize import norm_name, role_group_of, role_text
+
+    ra = role_text(a.new_posting, a.current_designation, a.new_district)
+    rb = role_text(b.new_posting, b.current_designation, b.new_district)
+    ga, gb = role_group_of(ra), role_group_of(rb)
+    if ga != gb:
+        return False
+    if ga == "Other" and norm_name(ra) != norm_name(rb):
+        return False
+    return abs((_record_day(a) - _record_day(b)).days) <= window_days
+
+
+def _absorb(target: IasTransfer, dup: IasTransfer) -> None:
+    """Fold ``dup`` into ``target``: fill gaps, union sources, flag conflicts."""
+    from app.agents.dedupe import _norm
+    from app.models.enums import TransferStatus
+
+    discrepancies = list(target.discrepancies or [])
+    for fld in _MERGE_FILL_FIELDS:
+        cur, new = getattr(target, fld), getattr(dup, fld)
+        if not new:
+            continue
+        if not cur:
+            setattr(target, fld, new)
+        elif fld not in ("source_headline", "reason") and _norm(str(cur)) != _norm(str(new)):
+            discrepancies.append({"field": fld, "existing": cur, "incoming": new,
+                                  "source": dup.source_url})
+    sources = list(target.corroborating_sources or [])
+    for s in (dup.corroborating_sources or []) + [dup.source_url]:
+        if s and s not in sources:
+            sources.append(s)
+    target.corroborating_sources = sources
+    target.discrepancies = discrepancies
+    target.confidence_score = round(max(target.confidence_score, dup.confidence_score), 3)
+    if discrepancies:
+        target.status = TransferStatus.CONFLICTED
+    elif len(sources) >= 2 and target.status == TransferStatus.PENDING:
+        target.status = TransferStatus.VERIFIED
+
+
+def merge_near_duplicates(window_days: int = 10) -> dict:
+    """Collapse records that describe the same movement of the same officer.
+
+    The dedupe key is exact ("Chief Secretary, Manipur" and "Chief Secretary"
+    are different strings), so a reshuffle reported by several outlets can
+    leave two or three records for one appointment. Records for the same
+    officer, in the same role group, dated within ``window_days`` of each other
+    are merged into the earliest one; the later rows are deleted.
+    """
+    from app.services.normalize import norm_name
+
+    merged = 0
+    with session_scope() as db:
+        rows = db.execute(
+            select(IasTransfer).options(selectinload(IasTransfer.article))
+            .order_by(IasTransfer.created_at.asc(), IasTransfer.id.asc())
+        ).scalars().all()
+        groups: dict[str, list[IasTransfer]] = defaultdict(list)
+        for r in rows:
+            groups[norm_name(r.officer_name)].append(r)
+        for recs in groups.values():
+            if len(recs) < 2:
+                continue
+            kept: list[IasTransfer] = []
+            for r in recs:
+                target = next((k for k in kept if _same_movement(k, r, window_days)), None)
+                if target is None:
+                    kept.append(r)
+                    continue
+                _absorb(target, r)
+                db.delete(r)
+                merged += 1
+        db.commit()
+    if merged:
+        log.info("merged_near_duplicates", merged=merged)
+    return {"merged": merged}
+
+
+def propagate_officer_facts() -> dict:
+    """Copy stable facts (batch, cadre, state) between records of one officer.
+
+    An officer's batch does not change between postings, so once any record
+    knows it every record can. Free, no LLM, no network.
+    """
+    from app.services.normalize import norm_name
+
+    filled = 0
+    with session_scope() as db:
+        rows = db.execute(select(IasTransfer)).scalars().all()
+        groups: dict[str, list[IasTransfer]] = defaultdict(list)
+        for r in rows:
+            groups[norm_name(r.officer_name)].append(r)
+        for recs in groups.values():
+            if len(recs) < 2:
+                continue
+            for fld in _PROPAGATED_FIELDS:
+                values = [getattr(r, fld) for r in recs if getattr(r, fld)]
+                if not values:
+                    continue
+                best = Counter(values).most_common(1)[0][0]
+                for r in recs:
+                    if not getattr(r, fld):
+                        setattr(r, fld, best); filled += 1
+        db.commit()
+    if filled:
+        log.info("propagated_officer_facts", filled=filled)
+    return {"filled": filled}
 
 
 def purge_expired_news() -> dict:
@@ -163,6 +341,14 @@ def _run_cycle_locked(trigger: str) -> dict:
         result["processed"] = orchestrator.run_pending(
             db, time_budget_seconds=settings.CYCLE_TIME_BUDGET_SECONDS
         )
+    for key, step in (("normalized", normalize_existing_records),
+                      ("merged", merge_near_duplicates),
+                      ("propagated", propagate_officer_facts)):
+        try:
+            result[key] = step()
+        except Exception as exc:  # noqa: BLE001 — quality passes never break the cycle
+            log.warning(f"{key}_failed", error=str(exc))
+            result[key] = {"error": str(exc)[:300]}
     try:
         result["enriched"] = enrich_incomplete()
     except Exception as exc:  # noqa: BLE001 — enrichment is optional polish

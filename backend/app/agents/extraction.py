@@ -15,15 +15,10 @@ from app.core.logging import get_logger
 from app.models.article import Article
 from app.models.enums import ArticleStatus, LogLevel
 from app.services import ocr
+from app.services.normalize import looks_like_gov_order
 
 log = get_logger(__name__)
 
-_GOV_HINTS = ("gov.in", "nic.in", "dopt", "gazette", "notification", "order")
-
-
-def _looks_like_gov_order(href: str) -> bool:
-    low = href.lower()
-    return any(h in low for h in _GOV_HINTS)
 
 
 class ExtractionAgent(BaseAgent):
@@ -58,12 +53,13 @@ class ExtractionAgent(BaseAgent):
             self.audit("extract", f"Robots-disallowed, using headline: {url}",
                        level=LogLevel.INFO, article_id=article.id)
 
+        host = urlparse(final_url).netloc
         pdfs = [l for l in links if l.lower().endswith(".pdf")]
-        gov_links = [l for l in links if _looks_like_gov_order(l)]
+        gov_links = [l for l in links if looks_like_gov_order(l, host)]
 
         # Multimodal: append OCR'd text from government-order PDFs.
         for pdf in pdfs[:3]:
-            if _looks_like_gov_order(pdf):
+            if looks_like_gov_order(pdf, host):
                 ocr_text = ocr.extract_pdf_text(pdf)
                 if ocr_text.strip():
                     text += f"\n\n[GOVERNMENT ORDER PDF: {pdf}]\n{ocr_text}"

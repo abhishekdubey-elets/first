@@ -18,7 +18,6 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 
-from dateutil import parser as dateparser
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Response
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -29,6 +28,14 @@ from app.core.database import get_db
 from app.models import Article, IasTransfer
 from app.models.log import SystemLog
 from app.schemas.feed import FeedIndexResponse, FeedRecord, FeedResponse
+from app.services.normalize import (
+    clean as _clean, norm_batch, parse_loose_date, role_group_of, role_text,
+    strip_state_suffix,
+)
+
+# A transfer_date this far from the article date is taken to be a mistake
+# (an old order quoted in passing, a typo'd year) and the news date is used.
+MAX_DAYS_FROM_NEWS = 45
 
 router = APIRouter(tags=["feed"])
 
@@ -65,62 +72,26 @@ _MOVEMENT_RULES: tuple[tuple[str, tuple[str, ...]], ...] = (
                         "tenure extend")),
 )
 
-# Role grouping. Order matters: "Chief Secretary" must beat "Secretary", and
-# "Deputy Commissioner" (a Collector by another name) must beat "Commissioner".
-_ROLE_GROUPS: tuple[tuple[str, tuple[str, ...]], ...] = (
-    ("Chief Secretary", ("chief secretary", "मुख्य सचिव")),
-    ("District Magistrate / Collector", (
-        "district magistrate", "collector", "deputy commissioner", " dm ",
-        "जिलाधिकारी", "कलेक्टर", "जिला मजिस्ट्रेट", "उपायुक्त",
-    )),
-    ("Sub-Divisional Magistrate", (
-        "sub-divisional", "sub divisional", " sdm", "sdm ", "sdm,", "(sdm",
-        "एसडीएम", "उपखंड अधिकारी", "अनुविभागीय",
-    )),
-    ("Commissioner", ("commissioner", "आयुक्त")),
-    ("Secretary", ("secretary", "सचिव")),
-    ("Managing Director / CEO", (
-        "managing director", "chief executive", " ceo", "ceo,", "vice chairman",
-        "प्रबंध निदेशक", "मुख्य कार्यपालन",
-    )),
-    ("Director", ("director", "निदेशक")),
-    ("Chairman", ("chairman", "chairperson", "अध्यक्ष")),
-)
-
 
 # --- field derivation -------------------------------------------------------
-def _clean(value: str | None) -> str:
-    return (value or "").strip()
-
-
-def parse_loose_date(raw: str | None) -> datetime | None:
-    """Parse a free-text date, rejecting anything with a missing component.
-
-    ``transfer_date`` is copied verbatim from the article, so it can be
-    "15 August 2026", "2026-08-15", "with immediate effect" or "Monday".
-    Parsing twice with different defaults and keeping the result only when both
-    agree rejects strings that never specified a day or a month, which would
-    otherwise silently inherit today's.
-    """
-    text = _clean(raw)
-    if not text or not any(ch.isdigit() for ch in text):
-        return None
-    try:
-        a = dateparser.parse(text, dayfirst=True, default=datetime(2000, 1, 1))
-        b = dateparser.parse(text, dayfirst=True, default=datetime(2001, 6, 15))
-    except (ValueError, OverflowError, TypeError):
-        return None
-    if a is None or b is None or a.date() != b.date():
-        return None
-    return a
+def role_of(t: IasTransfer) -> str:
+    return role_text(t.new_posting, t.current_designation, t.new_district)
 
 
 def record_date(t: IasTransfer) -> str:
-    """Best available calendar date for the record, as YYYY-MM-DD."""
+    """Best available calendar date for the record, as YYYY-MM-DD.
+
+    A stated transfer date wins, unless it sits implausibly far from when the
+    news was published, in which case the publication date is used instead.
+    """
+    anchor = t.news_date or t.created_at
     for raw in (t.transfer_date, t.effective_date):
         parsed = parse_loose_date(raw)
-        if parsed is not None:
-            return parsed.date().isoformat()
+        if parsed is None:
+            continue
+        if anchor is not None and abs((parsed.date() - anchor.date()).days) > MAX_DAYS_FROM_NEWS:
+            continue
+        return parsed.date().isoformat()
     news = t.news_date
     if news is not None:
         return news.date().isoformat()
@@ -137,23 +108,6 @@ def movement_of(t: IasTransfer) -> str:
     if _clean(t.previous_district) or _clean(t.previous_posting):
         return "Transfer"
     return "Appointment"
-
-
-def role_of(t: IasTransfer) -> str:
-    return (
-        _clean(t.new_posting)
-        or _clean(t.current_designation)
-        or (f"Collector, {t.new_district}" if _clean(t.new_district) else "")
-        or "IAS Officer"
-    )
-
-
-def role_group_of(role: str) -> str:
-    padded = f" {role.lower()} "
-    for label, needles in _ROLE_GROUPS:
-        if any(n in padded for n in needles):
-            return label
-    return "Other"
 
 
 def company_of(t: IasTransfer) -> str:
@@ -208,9 +162,9 @@ def to_record(t: IasTransfer) -> dict:
         "id": t.id,
         "state": _clean(t.state),
         "cadre": _clean(t.cadre),
-        "batch": _clean(t.ias_batch),
-        "district": _clean(t.new_district),
-        "moved_from_district": _clean(t.previous_district),
+        "batch": norm_batch(t.ias_batch) or "",
+        "district": strip_state_suffix(t.new_district) or "",
+        "moved_from_district": strip_state_suffix(t.previous_district) or "",
         "order_number": _clean(t.notification_number),
         "order_link": _clean(t.gov_order_link),
         "source": _clean(t.source_name),

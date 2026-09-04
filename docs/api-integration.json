@@ -12,7 +12,8 @@
     "interval_seconds": 86400,
     "human": "once every 24 hours, plus one run when the backend restarts",
     "recommended_cache_seconds": 900,
-    "note": "Data changes at most once a day. Cache responses; polling faster gains nothing."
+    "note": "Data changes at most once a day. Cache responses; polling faster gains nothing.",
+    "keepalive": "A GitHub Actions workflow pings /health every 15 minutes and triggers the crawl daily at 02:30 UTC, so the free Space never pauses and the crawl runs even if it did. See docs/DEPLOYMENT.md."
   },
   "auth": {
     "type": "bearer_jwt",
@@ -673,7 +674,7 @@
       "date": {
         "type": "string",
         "format": "YYYY-MM-DD",
-        "source": "parseable transfer_date, else effective_date, else article publication date, else record creation date"
+        "source": "parseable transfer_date, else effective_date, else article publication date, else record creation date. A stated date more than 45 days from the article date is treated as a mistake and the article date is used."
       },
       "person": {
         "type": "string",
@@ -756,11 +757,13 @@
       },
       "batch": {
         "type": "string",
-        "extra": true
+        "extra": true,
+        "note": "always a four-digit year, or empty"
       },
       "district": {
         "type": "string",
-        "extra": true
+        "extra": true,
+        "note": "district only; a trailing ', State' is removed"
       },
       "moved_from_district": {
         "type": "string",

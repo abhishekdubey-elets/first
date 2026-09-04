@@ -53,7 +53,7 @@ ADD COLUMN` for new columns). No manual migration step is needed.
 
 ### Optional: external cron with pg_cron
 
-The in-process scheduler already runs the cycle hourly. If you also want an
+The in-process scheduler already runs the cycle on `DISCOVERY_INTERVAL_SECONDS` (daily in production). If you also want an
 external trigger (or you set `ENABLE_INPROCESS_SCHEDULER=false`), enable the
 `pg_cron` and `pg_net` extensions in Supabase and schedule:
 
@@ -100,7 +100,7 @@ Variables (non-secret):
 | `ENVIRONMENT` | `production` |
 | `GOOGLE_SHEET_ID` | target spreadsheet id |
 | `GOOGLE_WORKSHEET_NAME` | default `Transfers` |
-| `DISCOVERY_INTERVAL_SECONDS` | default `3600` |
+| `DISCOVERY_INTERVAL_SECONDS` | `86400` in production (daily); code default `3600` |
 | `LLM_PROVIDER` | `openai` (default) or `anthropic` |
 
 ### Deploy / redeploy
@@ -210,3 +210,32 @@ rows.
 - [ ] Keep the Supabase database password and service-account JSON only in Space secrets / a password manager, never in git (`.env`, `*-credentials.json` are git-ignored).
 - [ ] Share the Google Sheet with the service account only (least privilege), not the whole Drive.
 - [ ] Use Supabase's network restrictions if your plan supports them; the Space has no fixed egress IP, so leave the pooler reachable but keep the password strong.
+
+---
+
+## Keeping the crawler alive
+
+The crawler is an in-process scheduler inside the API container. A free
+Hugging Face Space pauses after 48 hours without an HTTP request, and the
+scheduler pauses with it, so a quiet weekend would silently skip crawls.
+
+`.github/workflows/keepalive.yml` covers this from GitHub Actions:
+
+| Job | Schedule | Does |
+|---|---|---|
+| `ping` | every 15 minutes | `GET /health`, so the Space never idles |
+| `crawl` | 02:30 UTC daily (08:00 IST) | `POST /api/v1/agents/run-cycle` with the cron token, so the crawl runs even if the Space did pause |
+
+One-time setup:
+
+1. Merge to the default branch (scheduled workflows only run there).
+2. Add the Space's `CRON_TOKEN` value as a repository secret named
+   `CRON_TOKEN` under Settings → Secrets and variables → Actions. If you no
+   longer have the value, set a new one in both places.
+3. Optionally run the workflow once by hand from the Actions tab with
+   "Also trigger a crawl now" ticked, to confirm the secret works.
+
+GitHub disables scheduled workflows after 60 days with no commits; any commit
+re-enables them. For belt and braces, also point a free uptime monitor
+(UptimeRobot, cron-job.org) at `/health` every 15 minutes — it needs no
+credentials and gives you downtime alerts as a bonus.

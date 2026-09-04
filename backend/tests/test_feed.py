@@ -78,6 +78,21 @@ def test_date_falls_back_through_transfer_then_news_then_created():
     assert record_date(_T()) == "2026-09-01"             # created_at
 
 
+def test_far_off_transfer_dates_fall_back_to_the_news_date():
+    news = datetime(2026, 9, 1, tzinfo=timezone.utc)
+    # An old order date quoted in the article must not backdate the record...
+    assert record_date(_T(transfer_date="26 May 2026", _news_date=news)) == "2026-09-01"
+    # ...but a date a couple of weeks either side is trusted.
+    assert record_date(_T(transfer_date="20 Aug 2026", _news_date=news)) == "2026-08-20"
+    assert record_date(_T(transfer_date="15 Sep 2026", _news_date=news)) == "2026-09-15"
+
+
+def test_feed_normalises_batch_and_district_on_output():
+    rec = to_record(_T(ias_batch="2023 बैच", new_district="Imphal, Manipur"))
+    assert rec["batch"] == "2023"
+    assert rec["district"] == "Imphal"
+
+
 def test_movement_reads_the_event_not_just_the_posting():
     assert movement_of(_T(new_posting="DM Lucknow", previous_district="Varanasi")) == "Transfer"
     assert movement_of(_T(new_posting="DM Lucknow")) == "Appointment"
