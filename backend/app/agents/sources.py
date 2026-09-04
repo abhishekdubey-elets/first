@@ -33,6 +33,9 @@ RSS_FEEDS = [
     ("Hindustan Times - India", "https://www.hindustantimes.com/feeds/rss/india-news/rssfeed.xml"),
     ("LiveMint - News", "https://www.livemint.com/rss/news"),
     ("NDTV - India", "https://feeds.feedburner.com/ndtvnews-india-news"),
+    # IAS/bureaucracy-focused outlets: direct article URLs, so extraction can
+    # read the full text instead of a Google News redirect stub.
+    ("Indian Masterminds", "https://indianmasterminds.com/feed/"),
 ]
 
 # Trusted source weighting for confidence scoring (government > wire > paper).
