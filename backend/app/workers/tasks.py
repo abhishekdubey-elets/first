@@ -231,12 +231,20 @@ def _same_movement(a: IasTransfer, b: IasTransfer, window_days: int) -> bool:
 
     ra = role_text(a.new_posting, a.current_designation, a.new_district)
     rb = role_text(b.new_posting, b.current_designation, b.new_district)
+    if abs((_record_day(a) - _record_day(b)).days) > window_days:
+        return False
+    na, nb = norm_name(ra), norm_name(rb)
+    # One outlet reports the full dual charge ("Additional MD, HSIIDC and CEO,
+    # Global City Project"), another only part of it ("Global City Project"):
+    # the shorter role text sitting inside the longer one is the same event.
+    if len(na) >= 8 and len(nb) >= 8 and (na in nb or nb in na):
+        return True
     ga, gb = role_group_of(ra), role_group_of(rb)
     if ga != gb:
         return False
-    if ga == "Other" and norm_name(ra) != norm_name(rb):
+    if ga == "Other" and na != nb:
         return False
-    return abs((_record_day(a) - _record_day(b)).days) <= window_days
+    return True
 
 
 def _better_name(a: str, b: str) -> str:

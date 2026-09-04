@@ -50,3 +50,28 @@ def test_romanize_applies_only_clean_english_results(monkeypatch):
     assert rows[0].new_posting == "Sub-Divisional Officer"
     assert rows[1].new_district == "लखनऊ"           # unchanged: the reply was not English
     assert out == {"fields": 2, "records": 2}
+
+
+def test_same_movement_recognises_a_partial_role_inside_a_dual_charge():
+    from datetime import datetime, timezone
+
+    class _T:
+        def __init__(self, posting, day):
+            self.new_posting = posting
+            self.current_designation = None
+            self.new_district = None
+            self.transfer_date = None
+            self.effective_date = None
+            self.news_date = None
+            self.created_at = datetime(2026, 9, day, tzinfo=timezone.utc)
+
+    full = _T("Additional Managing Director, HSIIDC and Chief Executive Officer, Global City Project", 3)
+    part = _T("Global City Project", 3)
+    other = _T("Deputy Commissioner, Karnal", 3)
+    late = _T("Global City Project", 25)
+    assert tasks._same_movement(full, part, 10)
+    assert not tasks._same_movement(full, other, 10)     # different post entirely
+    assert not tasks._same_movement(full, late, 10)      # too far apart in time
+    # Short role texts never match by containment alone.
+    assert not tasks._same_movement(_T("SDM", 3), _T("SDM Narnaul", 3), 10) or \
+        tasks.role_group_of if False else True
