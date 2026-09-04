@@ -102,7 +102,10 @@ class Settings(BaseSettings):
     # --- LLM / extraction --------------------------------------------------
     LLM_PROVIDER: LLMProvider = "openai"
     LLM_TEMPERATURE: float = 0.1
-    LLM_MAX_OUTPUT_TOKENS: int = 4000
+    # A state-wide reshuffle can list 130+ officers in one article, at roughly
+    # 150 tokens each. 4000 truncated those replies; the parser now salvages a
+    # cut-off array, but a generous cap means it rarely has to.
+    LLM_MAX_OUTPUT_TOKENS: int = 16000
     LLM_MAX_INPUT_CHARS: int = 16000
 
     # OpenAI (default). Set OPENAI_API_KEY via env or the dashboard Settings page.

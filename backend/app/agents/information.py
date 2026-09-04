@@ -180,7 +180,17 @@ class InformationAgent(BaseAgent):
         try:
             raw = llm.complete_json(SYSTEM_PROMPT, user_prompt,
                                     provider=provider, model=model)
+            truncated = isinstance(raw, dict) and raw.pop(llm.TRUNCATED_KEY, False)
             result = ExtractionResult.model_validate(raw)
+            if truncated:
+                # The model ran out of output room mid-list (very large
+                # reshuffles). Everything before the cut is kept; the tail is
+                # lost, so say so rather than fail the whole article.
+                self.audit("inform",
+                           f"LLM reply truncated for article {article.id}; kept "
+                           f"{len(result.transfers)} complete transfer(s)",
+                           level=LogLevel.WARNING, article_id=article.id,
+                           kept=len(result.transfers))
         except Exception as exc:  # noqa: BLE001
             # An LLM call error / unparseable reply is usually TRANSIENT — the
             # local model was momentarily overloaded or timed out. Do not mark

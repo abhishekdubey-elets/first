@@ -149,6 +149,10 @@ def _anthropic_chat(system_prompt: str, user_prompt: str, *, model: str,
     if resp.stop_reason == "refusal":
         raise LLMError(f"Anthropic declined the request ({model}): "
                        f"{getattr(resp.stop_details, 'category', None)}")
+    if resp.stop_reason == "max_tokens":
+        # Not fatal: the JSON parser recovers every complete object. Logged so a
+        # too-small cap shows up in the Space logs instead of as lost records.
+        log.warning("llm_output_truncated", model=model, max_tokens=max_tokens)
     return "".join(b.text for b in resp.content if b.type == "text").strip()
 
 
@@ -229,6 +233,9 @@ def embed_texts(texts: list[str]) -> list[list[float]]:
     return out
 
 
+TRUNCATED_KEY = "_truncated"
+
+
 def _parse_json(content: str) -> dict[str, Any]:
     try:
         return json.loads(content)
@@ -242,4 +249,33 @@ def _parse_json(content: str) -> dict[str, Any]:
             return json.loads(content[start : end + 1])
         except json.JSONDecodeError:
             pass
+    salvaged = _salvage_truncated(content[start:] if start != -1 else content)
+    if salvaged is not None:
+        return salvaged
     raise LLMError(f"Model did not return valid JSON: {content[:300]}")
+
+
+def _salvage_truncated(content: str, max_attempts: int = 60) -> dict[str, Any] | None:
+    """Recover the complete objects from a reply cut off by the token limit.
+
+    A reshuffle reply looks like ``{"is_transfer_news": true, "transfers": [
+    {...}, {...}, {"officer_name": "Sh`` — everything before the last complete
+    object is valid. Walk back through the closing braces and try to close the
+    array and the envelope at each one. The result is flagged with
+    ``_truncated`` so the caller can log how much it kept.
+    """
+    cut = content.rfind("}")
+    attempts = 0
+    while cut > 0 and attempts < max_attempts:
+        attempts += 1
+        head = content[: cut + 1]
+        for tail in ("]}", "}", "]}}", "}}"):
+            try:
+                obj = json.loads(head + tail)
+            except json.JSONDecodeError:
+                continue
+            if isinstance(obj, dict):
+                obj[TRUNCATED_KEY] = True
+                return obj
+        cut = content.rfind("}", 0, cut)
+    return None

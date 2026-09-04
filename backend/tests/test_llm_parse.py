@@ -39,3 +39,35 @@ def test_raises_on_garbage():
 def test_raises_on_empty_string():
     with pytest.raises(LLMError):
         _parse_json("")
+
+
+def test_truncated_reply_keeps_every_complete_record():
+    """A reply cut off by max_tokens mid-object must yield the finished ones."""
+    from app.services.llm import TRUNCATED_KEY, _parse_json
+
+    cut_off = (
+        '{"is_transfer_news": true, "transfers": ['
+        '{"officer_name": "Shahbaz Ahmad Mirza", "state": "Jammu and Kashmir", "new_posting": "Member, Tribunal"},'
+        '{"officer_name": "Anita Sharma", "state": "Jammu and Kashmir", "new_posting": "DC Kathua"},'
+        '{"officer_name": "Rajeev Singh", "state": "Jam'
+    )
+    out = _parse_json(cut_off)
+    assert out[TRUNCATED_KEY] is True
+    assert out["is_transfer_news"] is True
+    assert [t["officer_name"] for t in out["transfers"]] == ["Shahbaz Ahmad Mirza", "Anita Sharma"]
+
+
+def test_complete_reply_is_not_flagged_as_truncated():
+    from app.services.llm import TRUNCATED_KEY, _parse_json
+
+    out = _parse_json('{"is_transfer_news": false, "transfers": []}')
+    assert TRUNCATED_KEY not in out
+
+
+def test_hopeless_garbage_still_raises():
+    import pytest
+
+    from app.services.llm import LLMError, _parse_json
+
+    with pytest.raises(LLMError):
+        _parse_json("Sorry, I cannot help with that.")
