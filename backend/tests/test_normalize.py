@@ -57,3 +57,21 @@ def test_publishers_own_pages_are_never_orders():
     assert not looks_like_gov_order("https://www.thehindu.com/news/national/order-of-the-day/", host)
     # ...but the same path on another host still counts.
     assert looks_like_gov_order("https://www.other.org/news/order-of-the-day/", host)
+
+
+def test_name_key_collides_spelling_variants_of_one_officer():
+    from app.services.normalize import name_key, names_match
+
+    # The two real pairs the merge missed in production.
+    assert name_key("Mohd. Aijaz") == name_key("Mohammad Aijaz")
+    assert name_key("Aniruddh Yadav") == name_key("Anirudh Yadav")
+    assert names_match("Md Aijaz", "Mohammed Aijaz")
+    assert names_match("Dr. Anita Sharma IAS", "Anita Sharma")
+    assert names_match("A.S.P.S. Ravi Prakash", "ASPS Ravi Prakash")
+    # One-letter romanisation differences still match...
+    assert names_match("Sudhansh Pant", "Sudhanshu Pant")
+    # ...but different people do not.
+    assert not names_match("Rajeev Singh Thakur", "Rajeev Kumar")
+    assert not names_match("Anita Sharma", "Anita Verma")
+    assert not names_match("", "Anita Sharma")
+    assert not names_match("Ram", "Rama")           # too short to trust a ratio

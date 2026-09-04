@@ -239,11 +239,45 @@ def _same_movement(a: IasTransfer, b: IasTransfer, window_days: int) -> bool:
     return abs((_record_day(a) - _record_day(b)).days) <= window_days
 
 
+def _better_name(a: str, b: str) -> str:
+    """Prefer the unabbreviated, fuller spelling of an officer's name."""
+    a, b = (a or "").strip(), (b or "").strip()
+    a_abbr, b_abbr = "." in a, "." in b
+    if a_abbr != b_abbr:
+        return b if a_abbr else a
+    return b if len(b) > len(a) else a
+
+
+def _officer_clusters(rows: list[IasTransfer]) -> list[list[IasTransfer]]:
+    """Group records by officer, tolerating spelling variants of the name.
+
+    Records are bucketed by state first so the pairwise comparison stays cheap,
+    then joined when their names match under ``names_match``.
+    """
+    from app.services.normalize import names_match
+
+    by_state: dict[str, list[IasTransfer]] = defaultdict(list)
+    for r in rows:
+        by_state[(r.state or "").strip().lower()].append(r)
+    clusters: list[list[IasTransfer]] = []
+    for bucket in by_state.values():
+        local: list[list[IasTransfer]] = []
+        for r in bucket:
+            home = next((c for c in local if names_match(c[0].officer_name, r.officer_name)), None)
+            if home is None:
+                local.append([r])
+            else:
+                home.append(r)
+        clusters.extend(local)
+    return clusters
+
+
 def _absorb(target: IasTransfer, dup: IasTransfer) -> None:
     """Fold ``dup`` into ``target``: fill gaps, union sources, flag conflicts."""
     from app.agents.dedupe import _norm
     from app.models.enums import TransferStatus
 
+    target.officer_name = _better_name(target.officer_name, dup.officer_name)
     discrepancies = list(target.discrepancies or [])
     for fld in _MERGE_FILL_FIELDS:
         cur, new = getattr(target, fld), getattr(dup, fld)
@@ -276,18 +310,13 @@ def merge_near_duplicates(window_days: int = 10) -> dict:
     officer, in the same role group, dated within ``window_days`` of each other
     are merged into the earliest one; the later rows are deleted.
     """
-    from app.services.normalize import norm_name
-
     merged = 0
     with session_scope() as db:
         rows = db.execute(
             select(IasTransfer).options(selectinload(IasTransfer.article))
             .order_by(IasTransfer.created_at.asc(), IasTransfer.id.asc())
         ).scalars().all()
-        groups: dict[str, list[IasTransfer]] = defaultdict(list)
-        for r in rows:
-            groups[norm_name(r.officer_name)].append(r)
-        for recs in groups.values():
+        for recs in _officer_clusters(rows):
             if len(recs) < 2:
                 continue
             kept: list[IasTransfer] = []
@@ -311,15 +340,10 @@ def propagate_officer_facts() -> dict:
     An officer's batch does not change between postings, so once any record
     knows it every record can. Free, no LLM, no network.
     """
-    from app.services.normalize import norm_name
-
     filled = 0
     with session_scope() as db:
         rows = db.execute(select(IasTransfer)).scalars().all()
-        groups: dict[str, list[IasTransfer]] = defaultdict(list)
-        for r in rows:
-            groups[norm_name(r.officer_name)].append(r)
-        for recs in groups.values():
+        for recs in _officer_clusters(rows):
             if len(recs) < 2:
                 continue
             for fld in _PROPAGATED_FIELDS:

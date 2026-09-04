@@ -27,6 +27,51 @@ def norm_name(value: str | None) -> str:
     return _NON_ALNUM.sub("", clean(value).lower())
 
 
+# Honorifics and service tags that outlets prepend or append to a name.
+_NAME_NOISE = re.compile(
+    r"\b(dr|shri|shree|smt|sri|mr|mrs|ms|ias|ips|ifs|pcs|hcs|kas|jkas|officer)\b\.?",
+)
+# Common romanisation variants that mean the same name.
+_NAME_ALIASES = {
+    "mohd": "mohammad", "md": "mohammad", "mohammed": "mohammad",
+    "muhammad": "mohammad", "mohamad": "mohammad",
+    "kr": "kumar", "pd": "prasad", "pr": "prasad", "sk": "sk",
+    "ch": "chandra", "chandr": "chandra",
+}
+_REPEATS = re.compile(r"(.)\1+")
+
+
+def name_key(value: str | None) -> str:
+    """A key under which spelling variants of one officer collide.
+
+    'Mohd. Aijaz' and 'Mohammad Aijaz' -> 'mohammadaijaz';
+    'Aniruddh Yadav' and 'Anirudh Yadav' -> 'anirudhyadav'.
+    Honorifics go, abbreviations expand, doubled letters collapse (Indian
+    English romanisation is inconsistent about them), then punctuation and
+    spacing are dropped.
+    """
+    text = clean(value).lower()
+    text = _NAME_NOISE.sub(" ", text)
+    tokens = [_NAME_ALIASES.get(t, t) for t in re.split(r"[^a-z0-9ऀ-ॿ]+", text) if t]
+    joined = "".join(tokens)
+    return _REPEATS.sub(r"\1", joined)
+
+
+def names_match(a: str | None, b: str | None, threshold: float = 0.86) -> bool:
+    """Same officer? Equal keys, or very close keys (one-letter differences)."""
+    from difflib import SequenceMatcher
+
+    ka, kb = name_key(a), name_key(b)
+    if not ka or not kb:
+        return False
+    if ka == kb:
+        return True
+    # Short keys give inflated ratios; demand more of them.
+    if min(len(ka), len(kb)) < 6:
+        return False
+    return SequenceMatcher(None, ka, kb).ratio() >= threshold
+
+
 def norm_batch(value: str | None) -> str | None:
     """'2009 batch', '2023 बैच', 'IAS 2009' -> '2009'. Anything else -> None.
 
