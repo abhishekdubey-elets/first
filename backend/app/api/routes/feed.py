@@ -168,7 +168,6 @@ def to_record(t: IasTransfer) -> dict:
         "order_number": _clean(t.notification_number),
         "order_link": _clean(t.gov_order_link),
         "source": _clean(t.source_name),
-        "source_url": _clean(t.source_url),
         "status": t.status.value if hasattr(t.status, "value") else str(t.status),
         "updated": t.updated_at.isoformat(),
     }

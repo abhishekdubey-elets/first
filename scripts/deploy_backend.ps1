@@ -1,4 +1,4 @@
-# =============================================================================
+﻿# =============================================================================
 # deploy_backend.ps1 — publish ./backend to the Hugging Face Space
 # =============================================================================
 # The Space (abhishek-elets/ias-transfer-intelligence) builds from its OWN git
@@ -33,7 +33,7 @@ if (-not (Test-Path (Join-Path $WorkDir '.git'))) {
 
 # Mirror backend/ -> Space root. /MIR deletes files that no longer exist in
 # backend/, but never touches the Space's .git directory or LFS attributes.
-robocopy $Backend $WorkDir /MIR /NFL /NDL /NJH /NJS /XD .git .venv __pycache__ .pytest_cache data storage /XF .env '*.pyc' 'celerybeat-schedule.*' | Out-Null
+robocopy $Backend $WorkDir /MIR /NFL /NDL /NJH /NJS /XD .git .venv .vercel __pycache__ .pytest_cache data storage /XF .env '*.pyc' 'celerybeat-schedule.*' | Out-Null
 if ($LASTEXITCODE -ge 8) { throw "robocopy failed with exit code $LASTEXITCODE" }
 git -C $WorkDir checkout --quiet -- .gitattributes 2>$null
 

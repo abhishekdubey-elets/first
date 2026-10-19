@@ -11,6 +11,7 @@ from __future__ import annotations
 
 from contextlib import contextmanager
 from typing import AsyncGenerator, Iterator
+from uuid import uuid4
 
 from sqlalchemy import create_engine
 from sqlalchemy.ext.asyncio import (
@@ -19,6 +20,7 @@ from sqlalchemy.ext.asyncio import (
     create_async_engine,
 )
 from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
+from sqlalchemy.pool import NullPool
 
 from app.core.config import settings
 
@@ -29,18 +31,32 @@ class Base(DeclarativeBase):
 
 # Managed Postgres (Supabase/Neon) requires TLS. asyncpg takes ssl="require";
 # psycopg2 takes sslmode="require".
-_async_connect_args = {"ssl": "require"} if settings.DB_SSL else {}
+_async_connect_args: dict = {"ssl": "require"} if settings.DB_SSL else {}
 _sync_connect_args = {"sslmode": "require"} if settings.DB_SSL else {}
+
+if settings.DB_TRANSACTION_POOLER:
+    # Transaction-mode poolers multiplex sessions, so cached prepared statements
+    # from one connection are unknown on the next; disable the cache and make
+    # statement names unique per connection.
+    _async_connect_args["statement_cache_size"] = 0
+    _async_connect_args["prepared_statement_name_func"] = (
+        lambda: f"__asyncpg_{uuid4()}__"
+    )
+
+
+def _pool_kwargs(pool_size: int, max_overflow: int) -> dict:
+    if settings.DB_POOL_MODE.lower() == "null":
+        return {"poolclass": NullPool}
+    return {"pool_size": pool_size, "max_overflow": max_overflow}
 
 
 # --- Async (API) -----------------------------------------------------------
 async_engine = create_async_engine(
     settings.DATABASE_URL,
     pool_pre_ping=True,
-    pool_size=10,
-    max_overflow=20,
     echo=False,
     connect_args=_async_connect_args,
+    **_pool_kwargs(settings.DB_POOL_SIZE, settings.DB_MAX_OVERFLOW),
 )
 
 AsyncSessionFactory = async_sessionmaker(
@@ -63,10 +79,9 @@ async def get_db() -> AsyncGenerator[AsyncSession, None]:
 sync_engine = create_engine(
     settings.DATABASE_URL_SYNC,
     pool_pre_ping=True,
-    pool_size=5,
-    max_overflow=10,
     echo=False,
     connect_args=_sync_connect_args,
+    **_pool_kwargs(settings.DB_SYNC_POOL_SIZE, settings.DB_SYNC_MAX_OVERFLOW),
 )
 
 sync_session_factory: sessionmaker[Session] = sessionmaker(

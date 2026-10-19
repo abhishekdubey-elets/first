@@ -1,0 +1,12 @@
+# pyproject.toml carries no [project] dependencies (pytest/ruff config only);
+# hiding it makes Vercel's Python builder install requirements.txt instead.
+pyproject.toml
+tests/
+.pytest_cache/
+__pycache__/
+**/__pycache__/
+Dockerfile
+.dockerignore
+docker-compose.yml
+scripts/
+README.md

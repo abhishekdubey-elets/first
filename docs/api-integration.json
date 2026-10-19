@@ -781,10 +781,6 @@
         "type": "string",
         "extra": true
       },
-      "source_url": {
-        "type": "string",
-        "extra": true
-      },
       "status": {
         "type": "enum",
         "ref": "enums.transfer_status",

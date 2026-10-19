@@ -64,7 +64,6 @@ Same envelope, same twelve record keys in the same order:
       "order_number": "",
       "order_link": "",
       "source": "APAC Media",
-      "source_url": "https://apacnewsnetwork.com/2026/09/ias-rajeev-singh-thakur-...",
       "status": "exported",
       "updated": "2026-09-02T09:44:21+00:00"
     }

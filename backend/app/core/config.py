@@ -54,6 +54,18 @@ class Settings(BaseSettings):
     )
     # Require TLS to the database. Set true for managed Postgres (Supabase/Neon).
     DB_SSL: bool = False
+    # Connection pooling. Supabase's session pooler admits only 15 clients in
+    # total, so every long-lived process must stay well under that and
+    # serverless hosts (Vercel) must not pool at all: DB_POOL_MODE=null opens a
+    # connection per request and closes it. Pair it with the transaction pooler
+    # (port 6543) and DB_TRANSACTION_POOLER=true, which disables asyncpg's
+    # prepared-statement cache that pgbouncer/Supavisor transaction mode rejects.
+    DB_POOL_MODE: str = "queue"  # queue | null
+    DB_POOL_SIZE: int = 10
+    DB_MAX_OVERFLOW: int = 20
+    DB_SYNC_POOL_SIZE: int = 5
+    DB_SYNC_MAX_OVERFLOW: int = 10
+    DB_TRANSACTION_POOLER: bool = False
 
     # --- Scheduling --------------------------------------------------------
     # Shared secret for the cron-triggered discovery endpoint

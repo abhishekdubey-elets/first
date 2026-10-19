@@ -31,7 +31,6 @@ _EXAMPLE_RECORD = {
     "order_number": "",
     "order_link": "",
     "source": "APAC Media",
-    "source_url": "https://apacnewsnetwork.com/2026/09/ias-rajeev-singh-thakur-appointed-manipur-chief-secretary/",
     "status": "exported",
     "updated": "2026-09-02T09:44:21+00:00",
 }
@@ -75,8 +74,7 @@ class FeedRecord(BaseModel):
     moved_from_district: str = Field(description="Origin district.")
     order_number: str = Field(description="Government order number.")
     order_link: str = Field(description="Link to the government order, when published.")
-    source: str = Field(description="Publisher name.")
-    source_url: str = Field(description="Link to the source article.")
+    source: str = Field(description="Publisher name. The article URL is deliberately not published.")
     status: str = Field(description="pending, verified, conflicted, exported or export_failed.")
     updated: str = Field(description="When this record last changed, ISO-8601 UTC.")
 
