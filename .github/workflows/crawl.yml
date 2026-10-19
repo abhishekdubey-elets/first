@@ -1,0 +1,89 @@
+name: Crawl
+
+# Runs the discovery pipeline on a schedule. The API is served by Vercel, but a
+# Vercel (Hobby) function is killed after 60 seconds while a cycle takes 25
+# minutes or more, so the crawl runs here instead and writes to the same
+# Supabase database the API reads.
+#
+# Required repository secrets:
+#   DATABASE_URL        postgresql+asyncpg://...pooler.supabase.com:5432/postgres
+#   DATABASE_URL_SYNC   postgresql+psycopg2://...pooler.supabase.com:5432/postgres
+#   ANTHROPIC_API_KEY   extraction (LLM_PROVIDER below selects the provider)
+#   OPENAI_API_KEY      embeddings for the assistant; extraction if provider=openai
+#   ENCRYPTION_KEY      only needed to read API keys saved via the Settings page
+# Optional, for Google Sheets export:
+#   GOOGLE_CREDENTIALS_JSON, GOOGLE_SHEET_ID
+#
+# Use the Session Pooler (port 5432) here — this is one long-lived client, and
+# the transaction pooler Vercel uses is tuned for short serverless requests.
+
+on:
+  schedule:
+    - cron: "30 2 * * *"      # 02:30 UTC = 08:00 IST, daily
+  workflow_dispatch:
+    inputs:
+      max_runs:
+        description: "How many cycles to run back-to-back (clearing a backlog needs several)"
+        default: "1"
+      deadline:
+        description: "Wall-clock budget in seconds (0 = no limit)"
+        default: "0"
+
+concurrency:
+  group: crawl
+  cancel-in-progress: false
+
+jobs:
+  crawl:
+    runs-on: ubuntu-latest
+    timeout-minutes: 350        # the job limit is 6 h; stop short of it
+
+    env:
+      DATABASE_URL: ${{ secrets.DATABASE_URL }}
+      DATABASE_URL_SYNC: ${{ secrets.DATABASE_URL_SYNC }}
+      DB_SSL: "true"
+      # Defaults to the provider whose key is known good; switch by setting a
+      # repository variable LLM_PROVIDER to "anthropic".
+      LLM_PROVIDER: ${{ vars.LLM_PROVIDER || 'openai' }}
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      ENCRYPTION_KEY: ${{ secrets.ENCRYPTION_KEY }}
+      ENABLE_INPROCESS_SCHEDULER: "0"
+      CYCLE_TIME_BUDGET_SECONDS: "3000"
+      GOOGLE_SHEET_ID: ${{ secrets.GOOGLE_SHEET_ID }}
+      GOOGLE_CREDENTIALS_FILE: ${{ github.workspace }}/google-credentials.json
+      # Without credentials the export would mark records export_failed, so only
+      # turn it on when the service-account JSON is actually available. The
+      # secrets context is not allowed in a step's `if:`, so it is read here.
+      GOOGLE_SHEETS_AUTO_EXPORT: ${{ secrets.GOOGLE_CREDENTIALS_JSON != '' }}
+      HAS_GOOGLE_CREDENTIALS: ${{ secrets.GOOGLE_CREDENTIALS_JSON != '' }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+
+      - name: Install dependencies
+        working-directory: backend
+        run: pip install -r requirements.txt
+
+      - name: Write Google credentials
+        if: env.HAS_GOOGLE_CREDENTIALS == 'true'
+        env:
+          CREDENTIALS_JSON: ${{ secrets.GOOGLE_CREDENTIALS_JSON }}
+        run: printf '%s' "$CREDENTIALS_JSON" > "$GOOGLE_CREDENTIALS_FILE"
+
+      - name: Run discovery cycle
+        working-directory: backend
+        run: |
+          python -m scripts.run_cycle \
+            --max-runs "${{ inputs.max_runs || '1' }}" \
+            --deadline "${{ inputs.deadline || '0' }}"
+
+      - name: Report pipeline state
+        if: always()
+        run: curl -sS --max-time 60 https://ias-backend.vercel.app/health | head -c 1000
