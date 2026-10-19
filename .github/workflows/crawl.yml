@@ -28,6 +28,9 @@ on:
       deadline:
         description: "Wall-clock budget in seconds (0 = no limit)"
         default: "0"
+      lookback_hours:
+        description: "How far back to search news; raise it to catch up after an outage (default 48)"
+        default: "48"
 
 concurrency:
   group: crawl
@@ -50,6 +53,7 @@ jobs:
       ENCRYPTION_KEY: ${{ secrets.ENCRYPTION_KEY }}
       ENABLE_INPROCESS_SCHEDULER: "0"
       CYCLE_TIME_BUDGET_SECONDS: "3000"
+      DISCOVERY_LOOKBACK_HOURS: ${{ inputs.lookback_hours || '48' }}
       GOOGLE_SHEET_ID: ${{ secrets.GOOGLE_SHEET_ID }}
       GOOGLE_CREDENTIALS_FILE: ${{ github.workspace }}/google-credentials.json
       # Without credentials the export would mark records export_failed, so only
