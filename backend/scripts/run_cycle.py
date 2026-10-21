@@ -23,11 +23,35 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+from app.core.config import settings  # noqa: E402
 from app.core.logging import configure_logging  # noqa: E402
 from app.workers.tasks import run_discovery_cycle  # noqa: E402
 
 
+def check_database_configured() -> str | None:
+    """Explain a missing database URL instead of failing deep in the pipeline.
+
+    Unset secrets leave the defaults in place, which point at localhost — on a
+    CI runner that surfaces as a bare 'connection refused' several layers down.
+    """
+    for name in ("DATABASE_URL", "DATABASE_URL_SYNC"):
+        url = getattr(settings, name)
+        if "localhost" in url or "127.0.0.1" in url:
+            return (
+                f"{name} still points at localhost, so the repository secret is "
+                "not set. Add DATABASE_URL and DATABASE_URL_SYNC (Supabase "
+                "Session Pooler, port 5432) under Settings -> Secrets and "
+                "variables -> Actions."
+            )
+    return None
+
+
 def main() -> int:
+    problem = check_database_configured()
+    if problem:
+        print(f"[run_cycle] {problem}", file=sys.stderr, flush=True)
+        return 2
+
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--max-runs", type=int, default=1,
                     help="Maximum cycles to run (default 1).")
