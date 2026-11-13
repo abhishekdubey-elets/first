@@ -16,6 +16,7 @@ stops early once the pipeline reports nothing left to process.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import sys
 import time
@@ -46,12 +47,47 @@ def check_database_configured() -> str | None:
     return None
 
 
-def main() -> int:
-    problem = check_database_configured()
-    if problem:
-        print(f"[run_cycle] {problem}", file=sys.stderr, flush=True)
-        return 2
+def check_llm_reachable() -> str | None:
+    """Spend one tiny completion to prove extraction can actually run.
 
+    An exhausted balance is only visible per-article, deep in the cycle: the
+    crawl still "succeeds" while every extraction returns 429 and the feed
+    quietly stops growing. Failing here instead makes the run go red on the
+    first day rather than the day someone notices the data is stale.
+    """
+    from app.services import llm
+
+    provider = llm.active_provider()
+    if not llm.is_available(provider):
+        return f"No API key is configured for LLM_PROVIDER={provider}."
+    try:
+        llm.complete_text("Reply with OK.", "ping", max_tokens=5, timeout=30)
+    except Exception as exc:  # noqa: BLE001 — any failure here stops the cycle
+        return (
+            f"{provider} ({llm.active_model(provider)}) rejected a test call, so "
+            f"every extraction would fail: {str(exc)[:300]}"
+        )
+    print(
+        f"[run_cycle] {provider} ({llm.active_model(provider)}) reachable; "
+        f"key fingerprint {_key_fingerprint(provider)}",
+        flush=True,
+    )
+    return None
+
+
+def _key_fingerprint(provider: str) -> str:
+    """First bytes of the key's SHA-256, to tell deployed keys apart in logs.
+
+    A hash, never the key itself: enough to confirm which credential a runner
+    picked up without putting the secret anywhere it could be read.
+    """
+    key = (
+        settings.ANTHROPIC_API_KEY if provider == "anthropic" else settings.OPENAI_API_KEY
+    ) or ""
+    return hashlib.sha256(key.encode()).hexdigest()[:8] if key else "none"
+
+
+def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--max-runs", type=int, default=1,
                     help="Maximum cycles to run (default 1).")
@@ -60,6 +96,12 @@ def main() -> int:
     args = ap.parse_args()
 
     configure_logging()
+
+    for problem in (check_database_configured(), check_llm_reachable()):
+        if problem:
+            print(f"[run_cycle] {problem}", file=sys.stderr, flush=True)
+            return 2
+
     started = time.monotonic()
     totals = {"articles": 0, "transfers": 0, "new": 0, "failed": 0}
     remaining: int | None = None
@@ -75,17 +117,29 @@ def main() -> int:
 
         if result.get("skipped"):
             break
+        # The per-article counters live under "processed", not at the top level.
+        processed = result.get("processed") or {}
         for key in totals:
-            value = result.get(key)
+            value = processed.get(key)
             if isinstance(value, int):
                 totals[key] += value
 
-        remaining = result.get("remaining")
+        remaining = processed.get("remaining")
         if not remaining:
             print("[run_cycle] no articles left to process", flush=True)
             break
 
     print(f"[run_cycle] done: {json.dumps(totals)} remaining={remaining}", flush=True)
+
+    # Articles that all fail to extract mean a broken pipeline, not a quiet news
+    # day: report it so the scheduled run goes red instead of silently green.
+    if totals["failed"] and not totals["transfers"]:
+        print(
+            f"[run_cycle] {totals['failed']} article(s) failed and nothing was "
+            "extracted — treating this cycle as failed.",
+            file=sys.stderr, flush=True,
+        )
+        return 1
     return 0
 
 
