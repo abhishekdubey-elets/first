@@ -1,7 +1,7 @@
 """The public feed must keep the CXO Movement Tracker record contract."""
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from app.api.routes import feed
 from app.api.routes.feed import (
@@ -85,6 +85,23 @@ def test_far_off_transfer_dates_fall_back_to_the_news_date():
     # ...but a date a couple of weeks either side is trusted.
     assert record_date(_T(transfer_date="20 Aug 2026", _news_date=news)) == "2026-08-20"
     assert record_date(_T(transfer_date="15 Sep 2026", _news_date=news)) == "2026-09-15"
+
+
+def test_future_transfer_dates_never_date_the_record():
+    """A posting that takes effect later must not outrank today's news."""
+    now = datetime.now(timezone.utc)
+    soon = (now + timedelta(days=22)).strftime("%d %b %Y")
+    news = now - timedelta(days=1)
+
+    # The announcement date is used, not the date the posting takes effect.
+    assert record_date(_T(transfer_date=soon, _news_date=news)) == news.date().isoformat()
+    # Same when the future date arrives via effective_date.
+    assert record_date(
+        _T(transfer_date="with immediate effect", effective_date=soon, _news_date=news)
+    ) == news.date().isoformat()
+    # And nothing the feed emits is ever dated past today.
+    assert record_date(_T(transfer_date=soon, _news_date=now + timedelta(days=5))) <= \
+        now.date().isoformat()
 
 
 def test_feed_normalises_batch_and_district_on_output():

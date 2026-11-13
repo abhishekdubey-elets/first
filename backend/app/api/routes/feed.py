@@ -83,19 +83,27 @@ def record_date(t: IasTransfer) -> str:
 
     A stated transfer date wins, unless it sits implausibly far from when the
     news was published, in which case the publication date is used instead.
+
+    A date that has not arrived yet is never used: articles routinely announce
+    a posting that takes effect next month, and dating the record by that would
+    sort an event that has not happened above the day's real news.
     """
+    today = datetime.now(timezone.utc).date()
     anchor = t.news_date or t.created_at
     for raw in (t.transfer_date, t.effective_date):
         parsed = parse_loose_date(raw)
         if parsed is None:
             continue
-        if anchor is not None and abs((parsed.date() - anchor.date()).days) > MAX_DAYS_FROM_NEWS:
+        day = parsed.date()
+        if day > today:
             continue
-        return parsed.date().isoformat()
+        if anchor is not None and abs((day - anchor.date()).days) > MAX_DAYS_FROM_NEWS:
+            continue
+        return day.isoformat()
     news = t.news_date
     if news is not None:
-        return news.date().isoformat()
-    return t.created_at.date().isoformat()
+        return min(news.date(), today).isoformat()
+    return min(t.created_at.date(), today).isoformat()
 
 
 def movement_of(t: IasTransfer) -> str:
