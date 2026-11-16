@@ -31,6 +31,9 @@ on:
       lookback_hours:
         description: "How far back to search news; raise it to catch up after an outage (default 48)"
         default: "48"
+      retention_days:
+        description: "Keep news articles this many days before purging; raise it so a backlog is processed before it ages out (default 15)"
+        default: "15"
 
 concurrency:
   group: crawl
@@ -54,6 +57,7 @@ jobs:
       ENABLE_INPROCESS_SCHEDULER: "0"
       CYCLE_TIME_BUDGET_SECONDS: "3000"
       DISCOVERY_LOOKBACK_HOURS: ${{ inputs.lookback_hours || '48' }}
+      NEWS_RETENTION_DAYS: ${{ inputs.retention_days || '15' }}
       GOOGLE_SHEET_ID: ${{ secrets.GOOGLE_SHEET_ID }}
       GOOGLE_CREDENTIALS_FILE: ${{ github.workspace }}/google-credentials.json
       # Without credentials the export would mark records export_failed, so only
