@@ -48,9 +48,9 @@ jobs:
       DATABASE_URL: ${{ secrets.DATABASE_URL }}
       DATABASE_URL_SYNC: ${{ secrets.DATABASE_URL_SYNC }}
       DB_SSL: "true"
-      # Defaults to the provider whose key is known good; switch by setting a
-      # repository variable LLM_PROVIDER to "anthropic".
-      LLM_PROVIDER: ${{ vars.LLM_PROVIDER || 'openai' }}
+      # Extraction runs on Anthropic; set a repository variable (Variables tab,
+      # not Secrets) LLM_PROVIDER=openai to switch back.
+      LLM_PROVIDER: ${{ vars.LLM_PROVIDER || 'anthropic' }}
       ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
       OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
       ENCRYPTION_KEY: ${{ secrets.ENCRYPTION_KEY }}
