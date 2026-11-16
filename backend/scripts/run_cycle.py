@@ -18,6 +18,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import os
 import sys
 import time
 from pathlib import Path
@@ -87,6 +88,18 @@ def _key_fingerprint(provider: str) -> str:
     return hashlib.sha256(key.encode()).hexdigest()[:8] if key else "none"
 
 
+def fail(message: str) -> None:
+    """Report why the run stopped, where whoever is looking will see it.
+
+    On GitHub Actions the log needs a signed-in collaborator, so the reason is
+    also raised as an error annotation, which shows on the run's summary page.
+    """
+    print(f"[run_cycle] {message}", file=sys.stderr, flush=True)
+    if os.environ.get("GITHUB_ACTIONS") == "true":
+        escaped = message.replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
+        print(f"::error title=Crawl stopped::{escaped}", flush=True)
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--max-runs", type=int, default=1,
@@ -99,7 +112,7 @@ def main() -> int:
 
     for problem in (check_database_configured(), check_llm_reachable()):
         if problem:
-            print(f"[run_cycle] {problem}", file=sys.stderr, flush=True)
+            fail(problem)
             return 2
 
     started = time.monotonic()
@@ -134,10 +147,9 @@ def main() -> int:
     # Articles that all fail to extract mean a broken pipeline, not a quiet news
     # day: report it so the scheduled run goes red instead of silently green.
     if totals["failed"] and not totals["transfers"]:
-        print(
-            f"[run_cycle] {totals['failed']} article(s) failed and nothing was "
-            "extracted — treating this cycle as failed.",
-            file=sys.stderr, flush=True,
+        fail(
+            f"{totals['failed']} article(s) failed and nothing was extracted — "
+            "treating this cycle as failed."
         )
         return 1
     return 0
