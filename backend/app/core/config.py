@@ -100,6 +100,19 @@ class Settings(BaseSettings):
     # many attempts per record before it is left as "no info".
     ENRICHMENT_BATCH_SIZE: int = 25
     ENRICHMENT_MAX_ATTEMPTS: int = 2
+    # Officer Research Agent: after each cycle, search the news (and Wikipedia)
+    # for this many officers, those an admin queued first, then never-researched
+    # ones (most recently moved first), then any not refreshed in REFRESH_DAYS.
+    # Each costs a few HTTP requests and at most one LLM call.
+    ENABLE_OFFICER_RESEARCH: bool = True
+    OFFICER_RESEARCH_BATCH_SIZE: int = 10
+    OFFICER_RESEARCH_REFRESH_DAYS: int = 30
+    OFFICER_RESEARCH_TIME_BUDGET_SECONDS: int = 600
+    # Article pages read per officer: most officers are named only in the body
+    # of a reshuffle story, and photos come from these pages too. Each Google
+    # News link costs one resolution, and Google rate-limits an IP after a few
+    # dozen; discovery spends up to DISCOVERY_MAX_LINK_RESOLUTIONS_PER_RUN first.
+    OFFICER_RESEARCH_MAX_PAGES: int = 4
     # News-feed retention: articles older than this (by discovery time) are
     # purged; the transfer records extracted from them are kept.
     NEWS_RETENTION_DAYS: int = 15

@@ -351,7 +351,103 @@
       },
       "response": "Transfer[]",
       "response_shape": "plain array, no pagination wrapper",
-      "warning": "Backend uses a substring match, so 'Amit Kumar' also returns 'Amit Kumari'. Filter for an exact case-insensitive match before rendering an officer page."
+      "warning": "Backend uses a substring match, so 'Amit Kumar' also returns 'Amit Kumari'. Prefer officer_profile, which groups spelling variants and keeps same-name officers apart."
+    },
+    "officers_list": {
+      "method": "GET",
+      "path": "/api/v1/officers",
+      "auth": "token",
+      "purpose": "Directory of every officer with at least one transfer record. One entry per person: spelling variants ('Mohd. Aijaz' / 'Mohammad Aijaz') are grouped, same-name officers in different cadres stay separate.",
+      "query": {
+        "page": {
+          "type": "integer",
+          "min": 1,
+          "default": 1
+        },
+        "page_size": {
+          "type": "integer",
+          "min": 1,
+          "max": 200,
+          "default": 25
+        },
+        "q": {
+          "type": "string",
+          "matches": "officer name or any recorded spelling variant"
+        },
+        "state": {
+          "type": "string",
+          "note": "any state the officer has served in; partial, case-insensitive"
+        },
+        "batch": {
+          "type": "string",
+          "note": "IAS batch year, e.g. 2009"
+        },
+        "cadre": {
+          "type": "string",
+          "note": "partial, case-insensitive"
+        },
+        "sort": {
+          "type": "enum",
+          "values": [
+            "recent",
+            "name",
+            "movements"
+          ],
+          "default": "recent"
+        },
+        "order": {
+          "type": "enum",
+          "values": [
+            "asc",
+            "desc"
+          ],
+          "default": "desc for recent/movements, asc for name"
+        }
+      },
+      "response": {
+        "items": "OfficerSummary[]",
+        "total": "integer",
+        "page": "integer",
+        "page_size": "integer"
+      },
+      "example_request": "/api/v1/officers?state=Uttar%20Pradesh&page_size=20"
+    },
+    "officer_profile": {
+      "method": "GET",
+      "path": "/api/v1/officers/{officer_id}",
+      "auth": "token",
+      "purpose": "One officer's page: identity, current posting, career timeline with tenure, stats, sources, government orders, officers moved in the same order, batchmates.",
+      "path_params": {
+        "officer_id": {
+          "type": "string",
+          "note": "OfficerSummary.id or Transfer.officer_id, e.g. anita-sharma--uttar-pradesh. A plain URL-encoded name also works; if several officers share it the most recently moved is returned and the rest are listed in alternates."
+        }
+      },
+      "response": "OfficerProfile",
+      "errors": {
+        "404": "Officer not found"
+      }
+    },
+    "officer_research_queue": {
+      "method": "POST",
+      "path": "/api/v1/officers/{officer_id}/research",
+      "auth": "admin token",
+      "purpose": "Queue the officer for the Officer Research Agent (press, photos, Wikipedia). Runs with the next crawl, not in this request.",
+      "response": "OfficerResearch (status: queued)"
+    },
+    "officer_image_visibility": {
+      "method": "PATCH",
+      "path": "/api/v1/officers/{officer_id}/images",
+      "auth": "admin token",
+      "request": {
+        "image_url": "string",
+        "hidden": "boolean (default true)"
+      },
+      "purpose": "Hide a wrong photo or restore it. Stays hidden across later research runs.",
+      "response": "OfficerResearch",
+      "errors": {
+        "404": "Officer or image not found"
+      }
     },
     "stats": {
       "method": "GET",
@@ -565,6 +661,11 @@
         "type": "string",
         "nullable": false
       },
+      "officer_id": {
+        "type": "string",
+        "nullable": true,
+        "note": "profile id for /api/v1/officers/{officer_id}"
+      },
       "ias_batch": {
         "type": "string",
         "nullable": true
@@ -747,6 +848,10 @@
         "type": "integer",
         "extra": true
       },
+      "officer_id": {
+        "type": "string",
+        "note": "Officer profile id, the same on every record of one officer (spelling variants and states included). Group by it to build officer pages; resolve with /api/v1/officers/{officer_id}."
+      },
       "state": {
         "type": "string",
         "extra": true
@@ -790,6 +895,94 @@
         "type": "datetime",
         "extra": true
       }
+    },
+    "OfficerSummary": {
+      "id": "string (URL slug)",
+      "name": "string",
+      "aliases": "string[] (other spellings seen)",
+      "batch": "string|null",
+      "cadre": "string|null",
+      "state": "string|null",
+      "bio": "string (summary sentence built only from the tracked records)",
+      "photo_url": "string|null (best visible photo found by the research agent; a link, not a copy)",
+      "current_role": "string",
+      "current_district": "string|null",
+      "current_state": "string|null",
+      "movements_count": "integer",
+      "first_seen": "YYYY-MM-DD",
+      "last_movement_date": "YYYY-MM-DD",
+      "last_movement": "Transfer | Appointment | Promotion | Retirement | Resignation | Re-appointment"
+    },
+    "OfficerProfile": {
+      "_note": "All OfficerSummary fields, plus the following.",
+      "current": "OfficerMovement|null (the latest movement)",
+      "timeline": "OfficerMovement[] (newest first)",
+      "stats": "{movements, distinct_postings, districts: string[], states: string[], role_groups: {role_group, count}[], first_seen, last_seen, average_tenure_days: integer|null, sources, verified_movements}",
+      "sources": "{name, url}[]",
+      "orders": "{number|null, url|null, date}[]",
+      "co_transferred": "OfficerLink[] (relation same_order or same_article)",
+      "batchmates": "OfficerLink[] (same batch and cadre)",
+      "alternates": "OfficerLink[] (other officers matching the requested name)",
+      "identity_notes": "string[] (where this officer's records disagree, e.g. two batch years)",
+      "research": "OfficerResearch|null (null until the Officer Research Agent has run or been queued)"
+    },
+    "OfficerMovement": {
+      "transfer_id": "integer",
+      "date": "YYYY-MM-DD (same rule as FeedRecord.date)",
+      "stated_date": "string|null (as written in the article)",
+      "movement": "string",
+      "role": "string",
+      "role_group": "string",
+      "from_posting": "string|null",
+      "from_district": "string|null",
+      "to_posting": "string|null",
+      "to_district": "string|null",
+      "state": "string|null",
+      "reason": "string|null",
+      "order_number": "string|null",
+      "order_link": "string|null",
+      "headline": "string",
+      "source_name": "string|null",
+      "source_url": "string|null",
+      "source_count": "integer",
+      "status": "enums.transfer_status",
+      "is_current": "boolean",
+      "tenure_days": "integer|null (days until the next movement; for a current posting, days so far)"
+    },
+    "OfficerLink": {
+      "id": "string",
+      "name": "string",
+      "batch": "string|null",
+      "state": "string|null",
+      "current_role": "string",
+      "relation": "same_order | same_article | batchmate | same_name"
+    },
+    "OfficerResearch": {
+      "status": "queued | done | failed",
+      "requested_at": "datetime|null",
+      "researched_at": "datetime|null",
+      "error": "string|null",
+      "press": "PressMention[] (newest first)",
+      "images": "OfficerImage[] (admins also see hidden ones)",
+      "photo": "OfficerImage|null (Wikipedia first, then the shortest caption)",
+      "wikipedia": "{title, url, extract, image_url|null, image_page|null}|null (CC BY-SA: credit Wikipedia)"
+    },
+    "PressMention": {
+      "url": "string (publisher page when it could be resolved)",
+      "title": "string",
+      "source": "string|null",
+      "published": "YYYY-MM-DD|null",
+      "snippet": "string|null",
+      "excerpt": "string|null (the article's sentence naming the officer)",
+      "verdict": "llm | context (how it was judged to be about this officer, not a namesake)"
+    },
+    "OfficerImage": {
+      "image_url": "string (hot-link; nothing is copied)",
+      "page_url": "string|null (where it was published)",
+      "caption": "string|null (caption or alt text naming the officer)",
+      "source": "string|null",
+      "origin": "wikipedia | press (press = matched by caption, unverified)",
+      "hidden": "boolean"
     }
   },
   "enums": {
@@ -840,6 +1033,11 @@
       "field": "public listing filter",
       "rule": "status in [verified, exported]",
       "why": "pending records are single-source and unconfirmed; conflicted records have contradictions"
+    },
+    {
+      "field": "officer photo",
+      "rule": "show photo_url with a credit linking photo.page_url; label origin 'press' as unverified; fall back to initials when null or the image fails to load",
+      "why": "photos are publishers' images matched by caption, not checked by a person"
     }
   ],
   "recommended_calls": {
@@ -853,7 +1051,9 @@
     "verified_only_table": "/api/v1/transfers?page_size=20&sort=news_date&order=desc&status=verified",
     "state_landing_page": "/api/v1/transfers?state=Bihar&page_size=50",
     "district_landing_page": "/api/v1/transfers?district=Patna&page_size=50",
-    "officer_timeline": "/api/v1/transfers/officer/{urlencoded_name}",
+    "officer_timeline": "/api/v1/officers/{officer_id}",
+    "officer_directory": "/api/v1/officers?page_size=25",
+    "officer_pages_from_feed": "group /api/v1/ias.json records by officer_id",
     "search": "/api/v1/transfers?q={query}&page_size=25",
     "charts": "/api/v1/stats/analytics"
   },

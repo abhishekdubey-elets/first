@@ -12,7 +12,7 @@ import {
   RefreshCw,
   AlertTriangle,
 } from 'lucide-react';
-import { getStats, getTransfers, getNews, getAgentStatus } from '@/lib/api';
+import { getStats, getTransfers, getNews, getAgentStatus, officerHref } from '@/lib/api';
 import type { Stats, Transfer, Article, AgentStatus } from '@/lib/types';
 import { PageHeader } from '@/components/PageHeader';
 import { StatCard } from '@/components/StatCard';
@@ -75,7 +75,7 @@ export default function DashboardPage() {
       header: 'Officer',
       render: (r) => (
         <Link
-          href={`/officers/${encodeURIComponent(r.officer_name)}`}
+          href={officerHref(r)}
           className="font-medium text-white hover:text-brand-cyan"
         >
           {r.officer_name}

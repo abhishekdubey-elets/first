@@ -15,6 +15,7 @@ from dateutil import parser as dateparser
 from app.core.india import canonical_state
 
 _YEAR = re.compile(r"(?<!\d)(19[5-9]\d|20[0-4]\d)(?!\d)")
+_YEAR_FIRST = re.compile(r"\d{4}[-/.]\d{1,2}[-/.]\d{1,2}(?!\d)")
 _NON_ALNUM = re.compile(r"[^a-z0-9ऀ-ॿ]+")
 
 
@@ -55,6 +56,56 @@ def name_key(value: str | None) -> str:
     tokens = [_NAME_ALIASES.get(t, t) for t in re.split(r"[^a-z0-9ऀ-ॿ]+", text) if t]
     joined = "".join(tokens)
     return _REPEATS.sub(r"\1", joined)
+
+
+def name_tokens(value: str | None) -> list[str]:
+    """Words of a name worth looking for in running text.
+
+    Honorifics and initials go ("A. Katherine Saranya" -> katherine, saranya)
+    and abbreviations expand, as in ``name_key``. Spelling is left as written;
+    compare through ``sounds_key``.
+    """
+    text = _NAME_NOISE.sub(" ", clean(value).lower())
+    tokens = [_NAME_ALIASES.get(t, t) for t in re.split(r"[^a-z0-9ऀ-ॿ]+", text) if t]
+    return [t for t in tokens if len(t) >= 3]
+
+
+# Spelling pairs that romanise one sound, e.g. Katherine / Catherine,
+# Sreenivas / Srinivas, Vishwanath / Vishvanath. Deliberately narrow: generic
+# fuzzy matching would also equate different names (Ramesh / Rakesh).
+_SOUNDS = (("ph", "f"), ("th", "t"), ("ck", "k"), ("q", "k"), ("w", "v"),
+           ("ee", "i"), ("oo", "u"))
+_HARD_C = re.compile(r"c(?!h)")
+
+
+def sounds_key(token: str) -> str:
+    """A name word reduced past romanisation differences (c/k, th/t, ee/i...)."""
+    t = token.lower()
+    for a, b in _SOUNDS:
+        t = t.replace(a, b)
+    return _REPEATS.sub(r"\1", _HARD_C.sub("k", t))
+
+
+def text_words(text: str | None) -> list[tuple[int, str]]:
+    """(position, sounds key) of every word in ``text``."""
+    return [(m.start(), sounds_key(_NAME_ALIASES.get(m.group(), m.group())))
+            for m in re.finditer(r"[a-z0-9ऀ-ॿ]+", clean(text).lower())]
+
+
+def text_mentions(text: str | None, names: list[str]) -> bool:
+    """Does ``text`` name one of ``names``? The name's significant words must
+    appear together, in order (initials in between are fine), allowing
+    romanisation variants such as Katherine / Catherine. "Rajesh Sharma and
+    Anil Kumar" does not mention Rajesh Kumar."""
+    words = [w for _, w in text_words(text) if len(w) >= 3]
+    for n in names:
+        toks = [sounds_key(t) for t in name_tokens(n)]
+        if not toks:
+            continue
+        for i in range(len(words) - len(toks) + 1):
+            if words[i:i + len(toks)] == toks:
+                return True
+    return False
 
 
 def names_match(a: str | None, b: str | None, threshold: float = 0.86) -> bool:
@@ -109,9 +160,13 @@ def parse_loose_date(raw: str | None) -> datetime | None:
     text = clean(raw)
     if not text or not any(ch.isdigit() for ch in text):
         return None
+    # Indian dates are day-first ("05/03/2026" is 5 March), but a string that
+    # leads with the year is ISO year-month-day: dayfirst would read
+    # "2026-03-05" as 3 May.
+    dayfirst = not _YEAR_FIRST.match(text)
     try:
-        a = dateparser.parse(text, dayfirst=True, default=datetime(2000, 1, 1))
-        b = dateparser.parse(text, dayfirst=True, default=datetime(2001, 6, 15))
+        a = dateparser.parse(text, dayfirst=dayfirst, default=datetime(2000, 1, 1))
+        b = dateparser.parse(text, dayfirst=dayfirst, default=datetime(2001, 6, 15))
     except (ValueError, OverflowError, TypeError):
         return None
     if a is None or b is None or a.date() != b.date():

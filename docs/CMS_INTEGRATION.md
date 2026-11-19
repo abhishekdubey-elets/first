@@ -91,6 +91,28 @@ IAS-specific and additive: code written against the tracker format ignores it.
 | `headline` | the source article headline. A reshuffle article covering several officers gives the same headline to each of its records |
 | `source_count` | how many articles reported this transfer |
 
+### Officer pages from the feed: group by `officer_id`
+
+Among the IAS-specific extras after the twelve tracker keys, `officer_id`
+names the officer a record belongs to, e.g. `a-katherine-saranya--tamil-nadu`.
+Every record of one officer carries the same id, including spelling variants
+("Mohd. Aijaz" / "Mohammad Aijaz") and postings in different states (an AGMUT
+officer in Delhi, then Goa), while two different officers who share a name get
+different ids. Group by it, not by `person`:
+
+```js
+const byOfficer = Object.groupBy(feed.records, r => r.officer_id);
+// byOfficer["a-katherine-saranya--tamil-nadu"] -> that officer's postings, newest first
+```
+
+An id can change when an officer's records do (most often: a later posting
+in another state shifts which state is most common). Old ids keep working
+with `GET /api/v1/officers/{officer_id}`, which resolves any spelling or state
+the officer has had.
+
+The feed never carries photos: photos found by the research agent are
+publishers' images, linked for the dashboard only.
+
 ### Query parameters
 
 | Param | Applies to | Notes |
@@ -262,7 +284,19 @@ Every record for one officer, newest first, as a plain array (no pagination
 wrapper). URL-encode the name.
 
 **Substring match** — `/officer/Amit%20Kumar` also returns "Amit Kumari".
-Filter for an exact case-insensitive match before rendering an officer page.
+For an officer page use `GET /api/v1/officers/{officer_id}` below instead.
+
+### `GET /api/v1/officers` and `GET /api/v1/officers/{officer_id}`
+
+One entry per officer (spelling variants grouped, same-name officers kept
+apart). The directory takes `q` (any spelling), `state`, `batch`, `cadre`,
+`sort` (`recent` | `movements` | `name`) and pagination. The profile returns
+`name`, `aliases`, `batch`, `cadre`, `bio` (a summary sentence built from the
+records), `current` posting, `timeline` (every posting with `tenure_days`),
+`stats`, `co_transferred`, `batchmates`, and `research`: press mentions,
+photos and a Wikipedia summary found by the Officer Research Agent (`null`
+until researched). `officer_id` is the feed's `officer_id`, a transfer's
+`officer_id`, or simply a URL-encoded name. Full shapes: `docs/API.md`.
 
 ### `GET /api/v1/stats`
 
@@ -370,11 +404,9 @@ function displayDate(t) {                       // real date, then news date, th
 const from = t.previous_district || t.previous_posting || "—";
 const to   = t.new_district      || t.new_posting      || "—";
 
-// Officer profile — tighten the loose backend match
-const rows  = await api(`/transfers/officer/${encodeURIComponent(name)}`);
-const exact = rows.filter(
-  t => t.officer_name.trim().toLowerCase() === name.trim().toLowerCase()
-);
+// Officer profile: by id (feed or transfer `officer_id`) or by plain name
+const officer = await api(`/officers/${encodeURIComponent(t.officer_id)}`);
+// officer.bio, officer.timeline, officer.research?.press, officer.alternates
 
 // Landing pages
 await api("/transfers", { state: "Bihar", page_size: 50 });

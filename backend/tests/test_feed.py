@@ -60,6 +60,11 @@ def test_loose_dates_reject_missing_components():
     assert parse_loose_date("2026-08-15").date().isoformat() == "2026-08-15"
     assert parse_loose_date("15 August 2026").date().isoformat() == "2026-08-15"
     assert parse_loose_date("15/08/2026").date().isoformat() == "2026-08-15"
+    # ISO is year-month-day even when the day could be a month; slashed
+    # Indian dates stay day-first.
+    assert parse_loose_date("2026-03-05").date().isoformat() == "2026-03-05"
+    assert parse_loose_date("2026-01-10T09:30:00").date().isoformat() == "2026-01-10"
+    assert parse_loose_date("05/03/2026").date().isoformat() == "2026-03-05"
     # No day, no month, or no date at all: rejected rather than guessed.
     assert parse_loose_date("August 2026") is None
     assert parse_loose_date("2026") is None

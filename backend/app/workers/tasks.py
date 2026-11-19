@@ -18,7 +18,7 @@ from __future__ import annotations
 import re
 import threading
 import traceback
-from collections import Counter, defaultdict
+from collections import Counter
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
@@ -31,6 +31,7 @@ from app.core.database import session_scope
 from app.core.logging import get_logger
 from app.models.article import Article
 from app.models.transfer import IasTransfer
+from app.services.officers import better_name, cluster_by_officer
 
 log = get_logger("pipeline")
 
@@ -247,37 +248,11 @@ def _same_movement(a: IasTransfer, b: IasTransfer, window_days: int) -> bool:
     return True
 
 
-def _better_name(a: str, b: str) -> str:
-    """Prefer the unabbreviated, fuller spelling of an officer's name."""
-    a, b = (a or "").strip(), (b or "").strip()
-    a_abbr, b_abbr = "." in a, "." in b
-    if a_abbr != b_abbr:
-        return b if a_abbr else a
-    return b if len(b) > len(a) else a
-
-
-def _officer_clusters(rows: list[IasTransfer]) -> list[list[IasTransfer]]:
-    """Group records by officer, tolerating spelling variants of the name.
-
-    Records are bucketed by state first so the pairwise comparison stays cheap,
-    then joined when their names match under ``names_match``.
-    """
-    from app.services.normalize import names_match
-
-    by_state: dict[str, list[IasTransfer]] = defaultdict(list)
-    for r in rows:
-        by_state[(r.state or "").strip().lower()].append(r)
-    clusters: list[list[IasTransfer]] = []
-    for bucket in by_state.values():
-        local: list[list[IasTransfer]] = []
-        for r in bucket:
-            home = next((c for c in local if names_match(c[0].officer_name, r.officer_name)), None)
-            if home is None:
-                local.append([r])
-            else:
-                home.append(r)
-        clusters.extend(local)
-    return clusters
+# One definition of "the same officer" for the pipeline and the officer
+# profiles (``app.services.officers``), so a profile groups records exactly
+# the way they were merged.
+_better_name = better_name
+_officer_clusters = cluster_by_officer
 
 
 def _absorb(target: IasTransfer, dup: IasTransfer) -> None:
@@ -368,6 +343,62 @@ def propagate_officer_facts() -> dict:
     return {"filled": filled}
 
 
+def research_officers(limit: int | None = None, officer_ref: str | None = None) -> dict:
+    """Officer Research Agent pass: press mentions and photos for profiles.
+
+    Picks admin-queued officers first, then never-researched ones (most
+    recently moved first), then any not refreshed in
+    ``OFFICER_RESEARCH_REFRESH_DAYS``. ``officer_ref`` (a profile id or name)
+    researches that one officer now, enabled or not.
+    """
+    import time
+
+    from app.agents.officer_research import OfficerResearchAgent, research_queue
+    from app.models.officer_research import OfficerResearch
+    from app.services import gnews
+    from app.services.officers import build_officers, resolve
+
+    if officer_ref is None and not settings.ENABLE_OFFICER_RESEARCH:
+        return {"skipped": "ENABLE_OFFICER_RESEARCH is off"}
+    deadline = time.monotonic() + settings.OFFICER_RESEARCH_TIME_BUDGET_SECONDS
+    now = datetime.now(timezone.utc)
+    researched = failed = 0
+    with session_scope() as db:
+        rows = db.execute(
+            select(IasTransfer).options(selectinload(IasTransfer.article))
+            .order_by(IasTransfer.created_at.desc(), IasTransfer.id.desc())
+            .limit(settings.FEED_MAX_RECORDS)
+        ).scalars().all()
+        officers = build_officers(rows)
+        existing = {r.officer_key: r for r in db.execute(select(OfficerResearch)).scalars()}
+        if officer_ref is not None:
+            target, _ = resolve(officers, officer_ref)
+            todo = [target] if target else []
+        else:
+            todo = research_queue(officers, existing, now=now,
+                                  refresh_days=settings.OFFICER_RESEARCH_REFRESH_DAYS,
+                                  limit=limit or settings.OFFICER_RESEARCH_BATCH_SIZE)
+        agent = OfficerResearchAgent(db)
+        for o in todo:
+            # Once Google rate-limits link resolution no article can be read;
+            # leave the rest of the batch for the next cycle.
+            if time.monotonic() > deadline or gnews.is_rate_limited():
+                break
+            row = existing.get(o.key)
+            if row is None:
+                row = OfficerResearch(officer_key=o.key, name_key=o.key.partition("|")[0],
+                                      state=o.state, officer_name=o.name, attempts=0)
+                db.add(row)
+            if agent.research(o, row):
+                researched += 1
+            else:
+                failed += 1
+            db.commit()
+    if researched or failed:
+        log.info("researched_officers", researched=researched, failed=failed)
+    return {"candidates": len(todo), "researched": researched, "failed": failed}
+
+
 def purge_expired_news() -> dict:
     """Delete news articles that have been in the feed longer than the retention window.
 
@@ -450,6 +481,11 @@ def _run_cycle_locked(trigger: str) -> dict:
     except Exception as exc:  # noqa: BLE001 — enrichment is optional polish
         log.warning("enrich_incomplete_failed", error=str(exc))
         result["enriched"] = {"candidates": 0, "enriched": 0, "error": str(exc)[:300]}
+    try:
+        result["researched"] = research_officers()
+    except Exception as exc:  # noqa: BLE001 — profiles are polish, never break the cycle
+        log.warning("research_officers_failed", error=str(exc))
+        result["researched"] = {"researched": 0, "error": str(exc)[:300]}
     try:
         result["purged"] = purge_expired_news()
     except Exception as exc:  # noqa: BLE001 — a purge failure must not break the cycle
