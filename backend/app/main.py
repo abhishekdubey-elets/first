@@ -11,7 +11,8 @@ from fastapi.responses import JSONResponse
 
 from app import __version__
 from app.api.routes import (
-    agents, auth, chat, feed, news, settings as settings_route, stats, sync, transfers,
+    agents, auth, chat, feed, news, officers, settings as settings_route, stats, sync,
+    transfers,
 )
 from app.bootstrap import backfill_source_headlines, ensure_first_admin
 from app.core.config import settings
@@ -269,5 +270,5 @@ async def _recent_failures(limit: int = 5) -> list[dict]:
 
 
 api = settings.API_V1_PREFIX
-for module in (auth, transfers, stats, news, sync, settings_route, agents, chat, feed):
+for module in (auth, transfers, officers, stats, news, sync, settings_route, agents, chat, feed):
     app.include_router(module.router, prefix=api)

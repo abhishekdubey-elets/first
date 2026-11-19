@@ -7,6 +7,10 @@ import type {
   LoginResponse,
   ModelsResponse,
   NewsQuery,
+  OfficerProfile,
+  OfficerResearch,
+  OfficersQuery,
+  OfficerSummary,
   Paginated,
   Settings,
   Stats,
@@ -110,11 +114,48 @@ export async function getTransfer(id: number | string): Promise<Transfer> {
   return data;
 }
 
-export async function getOfficerTransfers(name: string): Promise<Transfer[]> {
-  const { data } = await api.get<Transfer[]>(
-    `/api/v1/transfers/officer/${encodeURIComponent(name)}`
+// ---------- Officers ----------
+export async function getOfficers(
+  query?: OfficersQuery
+): Promise<Paginated<OfficerSummary>> {
+  const { data } = await api.get<Paginated<OfficerSummary>>('/api/v1/officers', {
+    params: cleanParams(query as Record<string, unknown>),
+  });
+  return data;
+}
+
+/** `ref` is an officer id (`anita-sharma--uttar-pradesh`) or a plain name. */
+export async function getOfficerProfile(ref: string): Promise<OfficerProfile> {
+  const { data } = await api.get<OfficerProfile>(
+    `/api/v1/officers/${encodeURIComponent(ref)}`
   );
   return data;
+}
+
+/** Admin: put the officer at the front of the research agent's queue. */
+export async function queueOfficerResearch(ref: string): Promise<OfficerResearch> {
+  const { data } = await api.post<OfficerResearch>(
+    `/api/v1/officers/${encodeURIComponent(ref)}/research`
+  );
+  return data;
+}
+
+/** Admin: hide (or restore) a photo on the officer's profile. */
+export async function setOfficerImageHidden(
+  ref: string,
+  imageUrl: string,
+  hidden: boolean,
+): Promise<OfficerResearch> {
+  const { data } = await api.patch<OfficerResearch>(
+    `/api/v1/officers/${encodeURIComponent(ref)}/images`,
+    { image_url: imageUrl, hidden },
+  );
+  return data;
+}
+
+/** Profile URL for a transfer row: its officer id, else the name (still resolves). */
+export function officerHref(t: { officer_id?: string | null; officer_name: string }): string {
+  return `/officers/${encodeURIComponent(t.officer_id || t.officer_name)}`;
 }
 
 // ---------- Stats + Analytics ----------

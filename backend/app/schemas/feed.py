@@ -23,6 +23,7 @@ _EXAMPLE_RECORD = {
     "headline": "IAS Rajeev Singh Thakur Appointed Manipur Chief Secretary",
     "source_count": 2,
     "id": 2,
+    "officer_id": "rajeev-singh-thakur--manipur",
     "state": "Manipur",
     "cadre": "Manipur",
     "batch": "1994",
@@ -67,6 +68,10 @@ class FeedRecord(BaseModel):
 
     # --- IAS-specific extras; a CXO-shaped consumer ignores these -----------
     id: int = Field(description="Stable record id.")
+    officer_id: str = Field(description=(
+        "Officer profile id, the same on every record of one officer (spelling "
+        "variants included). Group by it to build an officer page."
+    ))
     state: str = Field(description="Indian state or union territory.")
     cadre: str = Field(description="IAS state cadre.")
     batch: str = Field(description="IAS batch year, as written in the article.")

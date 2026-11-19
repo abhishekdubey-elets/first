@@ -42,6 +42,8 @@ class TransferOut(BaseModel):
 
     id: int
     officer_name: str
+    # Profile id for GET /api/v1/officers/{officer_id}.
+    officer_id: str | None = None
     ias_batch: str | None
     cadre: str | None
     state: str | None
