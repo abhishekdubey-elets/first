@@ -145,8 +145,14 @@ def headline_of(t: IasTransfer, role: str, movement: str) -> str:
     return f"{t.officer_name} {verb} {role}{tail}".strip()
 
 
-def to_record(t: IasTransfer) -> dict:
-    """One transfer as a CXO-format record plus IAS-specific extras."""
+def to_record(t: IasTransfer, officer_id: str | None = None) -> dict:
+    """One transfer as a CXO-format record plus IAS-specific extras.
+
+    ``officer_id`` is the profile id shared by all of this officer's records
+    (see ``canonical_ids``); without it the record's own spelling is used.
+    """
+    from app.services.officers import officer_slug
+
     movement = movement_of(t)
     role = role_of(t)
     moved_from = _clean(t.previous_district) or _clean(t.previous_posting)
@@ -168,6 +174,7 @@ def to_record(t: IasTransfer) -> dict:
         "source_count": max(len(sources), 1),
         # --- IAS-specific extras; ignore them for CXO-shaped consumers ---
         "id": t.id,
+        "officer_id": officer_id or officer_slug(t.officer_name, t.state),
         "state": _clean(t.state),
         "cadre": _clean(t.cadre),
         "batch": norm_batch(t.ias_batch) or "",
@@ -208,17 +215,23 @@ async def _last_updated(db: AsyncSession) -> str:
 
 
 async def _records(db: AsyncSession, *, limit: int, days: int | None) -> list[dict]:
+    from app.services.officers import canonical_ids
+
     stmt = select(IasTransfer).options(selectinload(IasTransfer.article))
-    if days:
-        cutoff = datetime.now(timezone.utc) - timedelta(days=days)
-        stmt = stmt.where(IasTransfer.created_at >= cutoff)
     # Order in SQL by the columns we have, then re-sort in Python on the
     # derived calendar date, which can come from free-text fields.
     rows = (await db.execute(
-        stmt.order_by(IasTransfer.created_at.desc()).limit(settings.FEED_MAX_RECORDS)
+        stmt.order_by(IasTransfer.created_at.desc(), IasTransfer.id.desc())
+        .limit(settings.FEED_MAX_RECORDS)
     )).scalars().all()
+    # Officers are grouped over every record, before the ``days`` window, so an
+    # officer keeps the same id whichever slice of the feed is requested.
+    officer_ids = canonical_ids(rows)
+    if days:
+        cutoff = datetime.now(timezone.utc) - timedelta(days=days)
+        rows = [t for t in rows if t.created_at >= cutoff]
 
-    records = [to_record(t) for t in rows]
+    records = [to_record(t, officer_ids.get(t.id)) for t in rows]
     records.sort(key=lambda r: (r["date"], r["id"]), reverse=True)
     return records[:limit]
 

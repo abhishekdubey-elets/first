@@ -11,6 +11,7 @@ import {
   Settings as SettingsIcon,
   Sparkles,
   Radar,
+  UserRound,
   X,
 } from 'lucide-react';
 import { motion } from 'framer-motion';
@@ -20,6 +21,7 @@ const nav = [
   { href: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
   { href: '/assistant', label: 'Assistant', icon: Sparkles },
   { href: '/transfers', label: 'Transfer Explorer', icon: ArrowLeftRight },
+  { href: '/officers', label: 'Officers', icon: UserRound },
   { href: '/analytics', label: 'Analytics', icon: BarChart3 },
   { href: '/news', label: 'News Feed', icon: Newspaper },
   { href: '/sync', label: 'Sheets Sync', icon: RefreshCw },

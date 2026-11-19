@@ -26,6 +26,7 @@ the OpenAI API (Anthropic is supported as an alternative provider).
 | 4 | **Dedupe / Validation** | `dedupe.py` | Computes a stable dedup key (officer + order number, or officer + destination + date), merges reports of the same transfer, records corroborating sources and flags conflicting fields. |
 | 5 | **Enrichment** | `enrichment.py` | Web-searches to fill missing from/to/state/date on incomplete records; at most `ENRICHMENT_MAX_ATTEMPTS` attempts per record, `ENRICHMENT_BATCH_SIZE` records per cycle. |
 | 6 | **Google Sheets** | `sheets_agent.py`, `services/google_sheets.py` | Upserts each **verified** record into one row of the configured sheet (append new, overwrite updated). |
+| 7 | **Officer Research** | `officer_research.py` | After each cycle, researches up to `OFFICER_RESEARCH_BATCH_SIZE` officers (admin-queued first, then never-researched, then those not refreshed in `OFFICER_RESEARCH_REFRESH_DAYS`): Google News for press mentions, including reshuffle stories that name them only in the body; Wikipedia for a summary and licensed photo; captioned photos in the matched articles. The LLM rules out namesakes; identity rests on text, never faces. Images are stored as links, shown only in the dashboard, and an admin can hide any. |
 | — | **Orchestrator** | `orchestrator.py`, `workers/tasks.py` | Wires the agents into one cycle, processes pending articles newest-first within a time budget, sends notifications for new records, and purges news older than `NEWS_RETENTION_DAYS` (transfer records are kept). |
 
 ### Data flow
@@ -73,7 +74,8 @@ the OpenAI API (Anthropic is supported as an alternative provider).
 | `/assistant` | RAG chat over the transfer records |
 | `/sync` | Google Sheets sync status, logs, retry |
 | `/settings` | Sheet/worksheet, auto-export, OpenAI key, credentials upload |
-| `/officers/[name]` | Officer transfer timeline |
+| `/officers` | Directory of every transferred officer: search any spelling, filter by state/batch/cadre |
+| `/officers/[id]` | Officer profile: photo or initials, summary line, "the whole journey" (postings and press by year), current posting with tenure, stats, Wikipedia summary, press and photos (admins can queue research or hide a photo), officers moved in the same order, batchmates, sources and orders |
 
 ---
 

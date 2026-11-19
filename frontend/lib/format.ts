@@ -55,6 +55,18 @@ export function dayLabel(value?: string | null): string {
   return format(d, 'dd MMM yyyy');
 }
 
+/** Time in a posting: 0 -> "under a day", 45 -> "45 days", 400 -> "1 yr 1 mo". */
+export function fmtTenure(days?: number | null): string {
+  if (days === undefined || days === null || days < 0) return '—';
+  if (days === 0) return 'under a day';
+  if (days < 60) return `${days} ${days === 1 ? 'day' : 'days'}`;
+  const months = Math.round(days / 30.44);
+  const years = Math.floor(months / 12);
+  const rest = months % 12;
+  if (years === 0) return `${months} mo`;
+  return rest ? `${years} yr ${rest} mo` : `${years} yr`;
+}
+
 /** Human-friendly interval, e.g. 3600 -> "1 hour", 5400 -> "1.5 hours", 900 -> "15 min". */
 export function fmtInterval(seconds?: number | null): string {
   if (!seconds || seconds <= 0) return '—';

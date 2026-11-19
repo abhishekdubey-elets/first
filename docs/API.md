@@ -31,9 +31,10 @@ All v1 routes are prefixed `/api/v1`. Interactive docs at `/docs` (Swagger) and
   - → `{ items: Transfer[], total, page, page_size }`
 - `GET /api/v1/transfers/{id}` → `Transfer` (404 if missing)
 - `GET /api/v1/transfers/officer/{name}` → `Transfer[]` (all records whose
-  officer name contains `name`, newest first)
+  officer name contains `name`, newest first). Substring match, so prefer the
+  officer profile below.
 
-`Transfer` = `{ id, officer_name, ias_batch, cadre, state, current_designation,
+`Transfer` = `{ id, officer_name, officer_id, ias_batch, cadre, state, current_designation,
 previous_district, previous_posting, new_district, new_posting, transfer_date,
 effective_date, news_date, reason, notification_number, gov_order_link,
 source_name, source_url, corroborating_sources: string[] | null,
@@ -41,7 +42,82 @@ discrepancies: object[] | null, status (pending|verified|conflicted|exported|
 export_failed), created_at, updated_at }`
 
 `news_date` is the publication date of the source article (the UI falls back to
-it when no explicit `transfer_date` was stated).
+it when no explicit `transfer_date` was stated). `officer_id` links the record to
+its officer profile.
+
+## Officers (directory + profile)
+A profile per officer, assembled from their transfer records (no separate
+table). Records are grouped the way the pipeline merges them: spelling variants
+of a name in one state are one officer ("Mohd. Aijaz" / "Mohammad Aijaz");
+identical names are joined across states only when the cadre matches and the
+batch does not conflict (an AGMUT officer in Delhi, then Goa). Two batch years
+never join. All dates are `YYYY-MM-DD`, derived like the public feed's `date`.
+
+- `GET /api/v1/officers` — query: `page, page_size, q, state, batch, cadre,
+  sort, order`
+  - `q` matches the name or any recorded spelling variant; `state` is any state
+    the officer has served in; `batch` is a year (`"2009 batch"` also works)
+  - `sort`: `recent` (default, last movement first) | `movements` | `name`;
+    `order` defaults to `desc`, or `asc` for `name`
+  - → `{ items: OfficerSummary[], total, page, page_size }`
+- `GET /api/v1/officers/{officer_id}` → `OfficerProfile` (404 if no match)
+  - `officer_id` is `OfficerSummary.id` / `Transfer.officer_id`, e.g.
+    `anita-sharma--uttar-pradesh`. Any spelling variant, any state the officer
+    served in, or a bare URL-encoded name also resolves. When several officers
+    share a name, the best match is returned (state in the id first, then the
+    most recently moved) and the others are listed in `alternates`.
+
+- `POST /api/v1/officers/{officer_id}/research` (admin) → `OfficerResearch`
+  with `status: "queued"`. Puts the officer at the front of the Officer
+  Research Agent's queue; the agent runs inside the crawl, not this request.
+- `PATCH /api/v1/officers/{officer_id}/images` (admin) — body
+  `{ image_url, hidden: true|false }` → `OfficerResearch`. Hides a wrong photo
+  (or restores it); a hidden photo stays hidden when the officer is researched
+  again. 404 if the image is not on this profile.
+
+`OfficerSummary` = `{ id, name, aliases: string[], batch, cadre, state, bio,
+photo_url, current_role, current_district, current_state, movements_count,
+first_seen, last_movement_date, last_movement }` — `bio` is a summary built
+only from the tracked records ("A. Katherine Saranya is an Indian
+Administrative Service officer (Tamil Nadu cadre). Currently Commissioner,
+Vellore Corporation, Tamil Nadu. 1 tracked posting change."); `photo_url` is
+the best visible photo the research agent found, or null.
+
+`OfficerProfile` = `OfficerSummary` plus `{ current: OfficerMovement | null,
+timeline: OfficerMovement[] (newest first), stats: { movements,
+distinct_postings, districts[], states[], role_groups: {role_group,count}[],
+first_seen, last_seen, average_tenure_days | null, sources, verified_movements },
+sources: {name,url}[], orders: {number,url,date}[], co_transferred: OfficerLink[],
+batchmates: OfficerLink[], alternates: OfficerLink[], identity_notes: string[],
+research: OfficerResearch | null }`
+
+`OfficerResearch` = `{ status: queued | done | failed, requested_at,
+researched_at, error, press: PressMention[] (newest first), images:
+OfficerImage[], photo: OfficerImage | null, wikipedia: { title, url, extract,
+image_url, image_page } | null }`. Non-admins never see hidden images.
+
+`PressMention` = `{ url, title, source, published (YYYY-MM-DD), snippet,
+excerpt, verdict: llm | context }` — `excerpt` is the sentence of the article
+that names the officer; `verdict` says how it was judged to be about this
+officer and not a namesake (the LLM, or, with no LLM configured, the excerpt
+or headline naming one of the officer's places).
+
+`OfficerImage` = `{ image_url, page_url, caption, source, origin: wikipedia |
+press, hidden }` — a link to where the image was published (nothing is
+copied). `press` images were matched by a caption or alt text naming the
+officer and are unverified; `photo` prefers Wikipedia, then the shortest
+caption.
+
+`OfficerMovement` = `{ transfer_id, date, stated_date, movement, role,
+role_group, from_posting, from_district, to_posting, to_district, state, reason,
+order_number, order_link, headline, source_name, source_url, source_count,
+status, is_current, tenure_days }` — `tenure_days` is the time until the next
+movement, or so far for a current posting; postings on the same day share it.
+
+`OfficerLink` = `{ id, name, batch, state, current_role, relation:
+same_order | same_article | batchmate | same_name }`. `co_transferred` lists
+officers in the same government order (`same_order`) or the same news report
+(`same_article`); `batchmates` share both batch and cadre.
 
 ## Dashboard stats + Analytics
 - `GET /api/v1/stats` → `{ total_transfers, today, this_week, this_month,
