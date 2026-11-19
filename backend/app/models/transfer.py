@@ -91,6 +91,13 @@ class IasTransfer(Base):
     )
 
     @property
+    def officer_id(self) -> str:
+        """Id of this officer's profile (``GET /api/v1/officers/{officer_id}``)."""
+        from app.services.officers import officer_slug
+
+        return officer_slug(self.officer_name, self.state)
+
+    @property
     def news_date(self) -> datetime | None:
         """Publication date of the source article (the "news date").
 

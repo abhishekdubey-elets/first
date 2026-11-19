@@ -9,6 +9,7 @@ from app.models.enums import (
     UserRole,
 )
 from app.models.log import SheetSyncLog, SystemLog
+from app.models.officer_research import OfficerResearch
 from app.models.transfer import IasTransfer
 from app.models.user import User
 
@@ -16,6 +17,7 @@ __all__ = [
     "Base",
     "Article",
     "IasTransfer",
+    "OfficerResearch",
     "User",
     "SystemLog",
     "SheetSyncLog",

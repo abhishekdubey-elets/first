@@ -5,7 +5,7 @@ import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
 import { useQuery, keepPreviousData } from '@tanstack/react-query';
 import { Search, SlidersHorizontal, RotateCcw } from 'lucide-react';
-import { getTransfers } from '@/lib/api';
+import { getTransfers, officerHref } from '@/lib/api';
 import type { Transfer, TransfersQuery } from '@/lib/types';
 import { PageHeader } from '@/components/PageHeader';
 import { GlassCard } from '@/components/GlassCard';
@@ -86,7 +86,7 @@ function TransfersExplorer() {
       header: 'Officer',
       render: (r) => (
         <Link
-          href={`/officers/${encodeURIComponent(r.officer_name)}`}
+          href={officerHref(r)}
           className="font-medium text-white hover:text-brand-cyan"
         >
           {r.officer_name}
