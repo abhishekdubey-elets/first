@@ -256,3 +256,77 @@ def test_directory_filters_and_sorts():
     assert names(directory(officers, state="maha")) == ["Rohit Menon"]
     assert names(directory(officers, batch="2012 batch")) == ["Rohit Menon"]
     assert names(directory(officers, cadre="uttar")) == ["Anita Sharma", "Mohd. Aijaz"]
+
+
+# --- public portal profile ---------------------------------------------------
+def _public_case(wiki_hidden: bool = False):
+    rows = [
+        _T(id=201, officer_name="Ravi Menon", transfer_date="2025-03-01",
+           new_district="Kozhikode", new_posting="Collector Kozhikode",
+           state="Kerala", cadre="Kerala",
+           source_url="https://news.example/ravi-1",
+           corroborating_sources=["https://news.example/ravi-1", "https://other.example/r"]),
+        _T(id=202, officer_name="Ravi Menon", transfer_date="2026-02-01",
+           previous_district="Kozhikode", new_posting="Secretary, Health",
+           state="Kerala", cadre="Kerala", source_url="https://news.example/ravi-2",
+           gov_order_link="https://kerala.gov.in/order.pdf", notification_number="GO/12"),
+    ]
+    officers = build_officers(rows, TODAY)
+    ravi = officers[0]
+    wiki_img = "https://upload.wikimedia.org/ravi.jpg"
+    research = {
+        "status": "done", "requested_at": None, "researched_at": None, "error": None,
+        "press": [{"url": "https://press.example/story", "title": "Ravi Menon takes charge",
+                   "source": "Mathrubhumi", "published": "2026-02-02",
+                   "snippet": "quoted snippet", "excerpt": "quoted excerpt", "verdict": "llm"}],
+        "images": [
+            {"image_url": wiki_img, "page_url": "https://en.wikipedia.org/wiki/File:Ravi.jpg",
+             "caption": "Ravi Menon", "source": "Wikipedia", "origin": "wikipedia",
+             "hidden": wiki_hidden},
+            {"image_url": "https://press.example/photo.jpg", "page_url": "https://press.example/story",
+             "caption": "Ravi Menon at an event", "source": "Mathrubhumi", "origin": "press"},
+        ],
+        "wikipedia": {"title": "Ravi Menon", "url": "https://en.wikipedia.org/wiki/Ravi_Menon",
+                      "extract": "Ravi Menon is an IAS officer.", "image_url": wiki_img,
+                      "image_page": "https://en.wikipedia.org/wiki/File:Ravi.jpg"},
+    }
+    if wiki_hidden:
+        research["images"] = [i for i in research["images"] if not i.get("hidden")]
+    return svc.public_profile(profile(ravi, officers), research)
+
+
+def test_public_profile_publishes_no_article_links_or_quotes():
+    import json
+
+    from app.schemas.officer import PublicOfficerProfile
+
+    out = _public_case()
+    PublicOfficerProfile(**out)
+    text = json.dumps(out)
+    for private in ("news.example", "other.example", "press.example",
+                    "quoted snippet", "quoted excerpt"):
+        assert private not in text, private
+    assert all("source_url" not in m for m in out["timeline"])
+    assert "sources" not in out and "research" not in out and "identity_notes" not in out
+    # Government orders are official documents and stay, as in the feed.
+    assert out["orders"][0]["url"] == "https://kerala.gov.in/order.pdf"
+    assert out["in_the_news"] == [
+        {"title": "Ravi Menon takes charge", "source": "Mathrubhumi", "published": "2026-02-02"}]
+
+
+def test_public_profile_shows_only_a_visible_wikipedia_photo():
+    out = _public_case()
+    assert out["photo_url"] == "https://upload.wikimedia.org/ravi.jpg"
+    assert out["wikipedia"]["url"] == "https://en.wikipedia.org/wiki/Ravi_Menon"
+
+    hidden = _public_case(wiki_hidden=True)
+    assert hidden["photo_url"] is None
+    assert hidden["wikipedia"]["image_url"] is None and hidden["wikipedia"]["image_page"] is None
+    assert hidden["wikipedia"]["extract"]  # the text itself is still published
+
+
+def test_public_profile_before_research():
+    rows = [_T(id=301, officer_name="Lata Bose", transfer_date="2026-05-01")]
+    officers = build_officers(rows, TODAY)
+    out = svc.public_profile(profile(officers[0], officers), None)
+    assert out["photo_url"] is None and out["wikipedia"] is None and out["in_the_news"] == []

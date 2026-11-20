@@ -107,11 +107,44 @@ const byOfficer = Object.groupBy(feed.records, r => r.officer_id);
 
 An id can change when an officer's records do (most often: a later posting
 in another state shifts which state is most common). Old ids keep working
-with `GET /api/v1/officers/{officer_id}`, which resolves any spelling or state
-the officer has had.
+with the profile endpoint below, which resolves any spelling or state the
+officer has had.
 
-The feed never carries photos: photos found by the research agent are
-publishers' images, linked for the dashboard only.
+### Officer profile page: `GET /api/v1/ias/officers/{officer_id}.json`
+
+One officer's profile, public like the feed (no login, any origin, cached 15
+minutes, `FEED_TOKEN` applies when set). Link each feed record to it with the
+record's `officer_id`:
+
+```
+https://ias-backend.vercel.app/api/v1/ias/officers/a-katherine-saranya--tamil-nadu.json
+```
+
+| Field | What to show |
+|---|---|
+| `name`, `aliases`, `batch`, `cadre`, `state` | the header |
+| `bio` | one-paragraph summary built from the tracked records |
+| `current` / `current_role` | where the officer is now, with `tenure_days` |
+| `timeline` | every posting change, newest first: `date`, `movement`, `role`, `from_*` / `to_*`, `headline`, `source_name` |
+| `stats` | movement count, districts and states served, average tenure |
+| `orders` | government orders: `number`, `url`, `date` |
+| `co_transferred`, `batchmates`, `alternates` | related officers; each has an `id` for its own profile link |
+| `in_the_news` | press headlines about the officer: `title`, `source`, `published` |
+| `wikipedia` | `extract` with `url`; credit Wikipedia with that link |
+| `photo_url` | Wikipedia photo, or `null`; credit it with `wikipedia.image_page` |
+
+What the profile leaves out, matching the feed: article links and text quoted
+from articles. Photos the research agent found in press coverage are matched
+on a caption and may show someone else, so they stay in the dashboard; only a
+Wikipedia photo is published, and only while no admin has hidden it.
+
+`in_the_news`, `wikipedia` and `photo_url` fill in as the Officer Research
+Agent reaches each officer (about ten per daily crawl, most recently moved
+first). Until then they are empty and the rest of the profile is complete.
+
+An unknown id returns `404`. A bare name also works
+(`/api/v1/ias/officers/Anita%20Sharma.json`) and returns the best match, with
+others of that name under `alternates`.
 
 ### Query parameters
 

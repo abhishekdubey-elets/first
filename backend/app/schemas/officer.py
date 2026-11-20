@@ -182,3 +182,58 @@ class OfficerProfile(OfficerSummary):
     research: OfficerResearchOut | None = Field(
         None, description="Officer Research Agent results; null until researched or queued"
     )
+
+
+# --- public portal (no login) ------------------------------------------------
+class PublicMovement(BaseModel):
+    """One career step as published on the portal: no article link."""
+
+    transfer_id: int = Field(description="Same as the feed record's id")
+    date: str = Field(description="YYYY-MM-DD")
+    stated_date: str | None = None
+    movement: str
+    role: str
+    role_group: str
+    from_posting: str | None = None
+    from_district: str | None = None
+    to_posting: str | None = None
+    to_district: str | None = None
+    state: str | None = None
+    reason: str | None = None
+    order_number: str | None = None
+    order_link: str | None = None
+    headline: str
+    source_name: str | None = Field(None, description="Publisher name")
+    source_count: int = 1
+    status: str
+    is_current: bool = False
+    tenure_days: int | None = None
+
+
+class NewsMention(BaseModel):
+    """A press story about the officer, as a headline (no link or excerpt)."""
+
+    title: str
+    source: str | None = Field(None, description="Publisher name")
+    published: str | None = Field(None, description="YYYY-MM-DD")
+
+
+class PublicOfficerProfile(OfficerSummary):
+    """``GET /api/v1/ias/officers/{officer_id}.json``: an officer page for the portal.
+
+    ``photo_url`` is the Wikipedia photo only; press photos are unverified and
+    stay in the dashboard. Wikipedia text and images are freely licensed and
+    must be credited with a link to ``wikipedia.url`` / ``wikipedia.image_page``.
+    """
+
+    current: PublicMovement | None = None
+    timeline: list[PublicMovement] = Field(description="Newest first")
+    stats: OfficerStats
+    orders: list[OrderLink]
+    co_transferred: list[OfficerLink] = Field(default_factory=list)
+    batchmates: list[OfficerLink] = Field(default_factory=list)
+    alternates: list[OfficerLink] = Field(default_factory=list)
+    wikipedia: WikipediaEntry | None = None
+    in_the_news: list[NewsMention] = Field(
+        default_factory=list, description="Newest first; empty until the officer is researched"
+    )

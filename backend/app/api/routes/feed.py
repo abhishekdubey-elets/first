@@ -28,6 +28,7 @@ from app.core.database import get_db
 from app.models import Article, IasTransfer
 from app.models.log import SystemLog
 from app.schemas.feed import FeedIndexResponse, FeedRecord, FeedResponse
+from app.schemas.officer import PublicOfficerProfile
 from app.services.normalize import (
     clean as _clean, norm_batch, parse_loose_date, role_group_of, role_text,
     strip_state_suffix,
@@ -293,6 +294,41 @@ async def ias_latest_feed(
     return _envelope(records, await _last_updated(db))
 
 
+@router.get(
+    "/ias/officers/{officer_id}.json",
+    response_model=PublicOfficerProfile,
+    summary="One officer's public profile",
+)
+async def officer_profile(
+    officer_id: str,
+    response: Response,
+    db: AsyncSession = Depends(get_db),
+    _: None = Depends(feed_access),
+):
+    """Profile page data for an officer named in the feed.
+
+    ``officer_id`` is the ``officer_id`` on any feed record (every record of one
+    officer carries the same one). An id that changed since the portal cached it,
+    or a bare name, still resolves to the best match.
+    """
+    from app.models import OfficerResearch
+    from app.services import officers as svc
+
+    rows = (await db.execute(
+        select(IasTransfer).options(selectinload(IasTransfer.article))
+        .order_by(IasTransfer.created_at.desc(), IasTransfer.id.desc())
+        .limit(settings.FEED_MAX_RECORDS)
+    )).scalars().all()
+    officers = svc.build_officers(rows)
+    officer, alternates = svc.resolve(officers, officer_id)
+    if officer is None:
+        raise HTTPException(status_code=404, detail="Officer not found")
+    research_rows = (await db.execute(select(OfficerResearch))).scalars().all()
+    research = svc.research_view(svc.research_for(officer, research_rows))
+    _cache(response)
+    return svc.public_profile(svc.profile(officer, officers, alternates), research)
+
+
 @router.get("/index.json", response_model=FeedIndexResponse, summary="Feed manifest")
 async def feed_index(
     response: Response,
@@ -313,5 +349,6 @@ async def feed_index(
             "articles": articles,
         },
         "refresh_interval_seconds": settings.DISCOVERY_INTERVAL_SECONDS,
-        "endpoints": ["ias.json", "ias_latest.json", "index.json"],
+        "endpoints": ["ias.json", "ias_latest.json", "index.json",
+                      "ias/officers/{officer_id}.json"],
     }

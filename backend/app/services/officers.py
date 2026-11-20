@@ -611,3 +611,41 @@ def research_view(rows: Sequence[Any], *, include_hidden: bool = False) -> dict 
         "photo": best_photo(images),
         "wikipedia": wiki,
     }
+
+
+# Profile keys the public portal never gets: the article list (the public feed
+# does not publish article URLs) and the reviewers' identity notes.
+_PRIVATE_PROFILE_KEYS = ("sources", "identity_notes", "research", "photo_url")
+
+
+def public_profile(payload: dict, research: dict | None) -> dict:
+    """The part of a profile that may be published without a login.
+
+    Article links and the text quoted from articles stay in the dashboard, as
+    in the public feed. Press photos are unverified (the agent matches them on
+    a caption), so only a Wikipedia photo is shown, and only while no admin has
+    hidden it; Wikipedia text and images are freely licensed and linked back.
+    """
+    out = {k: v for k, v in payload.items() if k not in _PRIVATE_PROFILE_KEYS}
+
+    def movement(m: dict | None) -> dict | None:
+        return {k: v for k, v in m.items() if k != "source_url"} if m else None
+
+    out["current"] = movement(payload.get("current"))
+    out["timeline"] = [movement(m) for m in payload.get("timeline", [])]
+
+    research = research or {}
+    visible = {
+        i["image_url"] for i in research.get("images", [])
+        if i.get("origin") == "wikipedia" and not i.get("hidden")
+    }
+    wiki = dict(research["wikipedia"]) if research.get("wikipedia") else None
+    if wiki and wiki.get("image_url") not in visible:
+        wiki["image_url"] = wiki["image_page"] = None
+    out["wikipedia"] = wiki
+    out["photo_url"] = wiki["image_url"] if wiki else None
+    out["in_the_news"] = [
+        {"title": p["title"], "source": p.get("source"), "published": p.get("published")}
+        for p in research.get("press", []) if p.get("title")
+    ]
+    return out
